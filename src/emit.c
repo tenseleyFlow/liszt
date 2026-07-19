@@ -37,9 +37,18 @@ drain(void)
     buf_len = 0;
 }
 
+static off_t emit_total;
+
+off_t
+liszt_emit_total(void)
+{
+    return emit_total;
+}
+
 void
 liszt_emit_bytes(const void *p, size_t n)
 {
+    emit_total += (off_t)n;
     if (buf_len + n > buf_cap) {
         size_t cap = buf_cap ? buf_cap : 64 * 1024;
         while (cap < buf_len + n)

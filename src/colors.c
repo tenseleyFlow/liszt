@@ -461,6 +461,14 @@ liszt_color_for(const struct liszt_colorable *c)
 
 /* --- emission ---------------------------------------------------------- */
 
+static off_t escape_bytes;
+
+off_t
+liszt_color_bytes(void)
+{
+    return escape_bytes;
+}
+
 void
 liszt_color_put(const struct liszt_binstr *s)
 {
@@ -471,6 +479,7 @@ liszt_color_put(const struct liszt_binstr *s)
         used_color = true;
         liszt_color_prep_non_filename();
     }
+    escape_bytes += (off_t)s->len;
     liszt_emit_bytes(s->string, s->len);
 }
 

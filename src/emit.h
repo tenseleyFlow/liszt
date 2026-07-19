@@ -2,6 +2,7 @@
 #define LISZT_EMIT_H
 
 #include <stddef.h>
+#include <sys/types.h>
 
 /* Buffered stdout emitter: bytes accumulate in a growable buffer and
    drain through write(2) at a threshold, never per-entry. Write errors
@@ -11,6 +12,10 @@
 
    Later sprints hang dired byte accounting off this layer, so every
    output byte must flow through it. */
+
+/* Total bytes handed to the emitter so far (buffered included) - the
+   dired accounting substrate: dired_pos = total - escape bytes. */
+off_t liszt_emit_total(void);
 
 void liszt_emit_bytes(const void *p, size_t n);
 void liszt_emit_byte(int c);

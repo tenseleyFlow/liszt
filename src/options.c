@@ -157,6 +157,7 @@ struct staging {
     int indicator_style;            /* enum liszt_indicator_style */
     int quoting_style_opt;          /* -1 unset */
     int eolbyte;                    /* '\n'; --zero stages 0 */
+    bool dired;                     /* -D seen */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -414,6 +415,12 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_HIDE:
         add_pattern(&st->hide_patterns, &st->n_hide_patterns, value);
+        break;
+    case 'D':
+        /* GNU: -D stages long format and drops --hyperlink; both are
+           positional, later options re-override. */
+        st->format_opt = LISZT_FMT_LONG;
+        st->dired = true;
         break;
     case KEY_ZERO:
         /* GNU's staging effects are positional last-wins: a later -l,
@@ -780,6 +787,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .indicator_style = LISZT_IND_NONE,
         .quoting_style_opt = -1,
         .eolbyte = '\n',
+        .dired = false,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -864,6 +872,13 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         o->sort = LISZT_SORT_NAME;
     o->time_type = (enum liszt_timetype)st.time_type;
     o->eolbyte = (char)st.eolbyte;
+    /* --dired implies long format; silently self-disables if a later
+       format word overrode that (GNU: dired &= format == long). The
+       --zero clash is fatal only when dired survives. */
+    o->dired = st.dired && o->format == LISZT_FMT_LONG;
+    if (o->eolbyte == 0 && o->dired)
+        liszt_die(LISZT_STATUS_SERIOUS, 0,
+                  "--dired and --zero are incompatible");
     o->hide_patterns = st.hide_patterns;
     o->n_hide_patterns = st.n_hide_patterns;
     o->ignore_patterns = st.ignore_patterns;
@@ -1060,4 +1075,13 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
                   "this sort is not supported yet");
     }
+}
+
+const char *
+liszt_quoting_style_word(enum liszt_qstyle style)
+{
+    for (int i = 0; i < N_QSTYLE_WORDS; i++)
+        if (qstyle_vals[i] == (int)style)
+            return qstyle_words[i];
+    return "literal";
 }

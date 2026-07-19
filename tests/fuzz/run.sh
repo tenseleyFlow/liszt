@@ -175,6 +175,9 @@ gen_plan() {
         if (p < 0.1) flags = flags " -B"
         else if (p < 0.18) flags = flags " -I u*"
         else if (p < 0.24) flags = flags " --hide=?*4"
+        p = rand()
+        if (p < 0.08) flags = flags " --zero"
+        else if (p < 0.16) flags = flags " -D"
         if (rand() < 0.2) flags = flags " -s"
         if (rand() < 0.2) flags = flags " -i"
         if (rand() < 0.15) flags = flags " -n"

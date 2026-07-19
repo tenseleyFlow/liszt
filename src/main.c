@@ -34,6 +34,50 @@ static struct liszt_plan plan;
 static const struct liszt_options *cur_opts;
 static bool cur_some_quoted;
 
+/* --dired accounting: offsets count every emitted byte except escape
+   sequences (color, later hyperlink), exactly GNU's dired_pos, whose
+   wrappers skip put_indicator output. Pairs bracket long-format names
+   (dired) and header names (subdired). */
+static bool dired_on;
+static off_t dired_escapes_extra;   /* non-color uncounted bytes */
+
+static off_t
+dired_pos_now(void)
+{
+    return liszt_emit_total() - liszt_color_bytes() - dired_escapes_extra;
+}
+
+struct dired_pairs {
+    off_t *v;
+    size_t n, cap;
+};
+static struct dired_pairs dired_names;
+static struct dired_pairs dired_subdirs;
+
+static void
+dired_push(struct dired_pairs *p)
+{
+    if (p->n == p->cap) {
+        p->cap = p->cap ? p->cap * 2 : 64;
+        p->v = liszt_xrealloc(p->v, p->cap * sizeof *p->v);
+    }
+    p->v[p->n++] = dired_pos_now();
+}
+
+static void
+dired_dump(const char *prefix, const struct dired_pairs *p)
+{
+    if (p->n == 0)
+        return;
+    char buf[32];
+    liszt_emit_str(prefix);
+    for (size_t i = 0; i < p->n; i++) {
+        int k = snprintf(buf, sizeof buf, " %jd", (intmax_t)p->v[i]);
+        liszt_emit_bytes(buf, (size_t)k);
+    }
+    liszt_emit_byte('\n');
+}
+
 /* GNU quoteaf/quotef: shell-escape-always vs shell-escape rendering for
    diagnostics. Static rotating buffers, two slots. */
 static const char *
@@ -264,7 +308,11 @@ emit_name_colored(const struct litem *it, bool symlink_target,
         liszt_emit_byte(' ');
     if (color)
         liszt_color_start(color);
+    if (dired_on && !symlink_target)
+        dired_push(&dired_names);
     liszt_emit_bytes(bytes, blen);
+    if (dired_on && !symlink_target)
+        dired_push(&dired_names);
     if (used_this) {
         liszt_color_prep_non_filename();
         if (cur_opts->line_length
@@ -374,6 +422,11 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
     const struct liszt_statinfo *st = it->st;
     size_t prefix_len = 0;
+
+    /* dired_indent: two counted spaces, outside the wrap-check prefix
+       (GNU writes them past the buffer that start_col measures). */
+    if (dired_on)
+        liszt_emit_str("  ");
 
     prefix_len += emit_frills_count(o, w, it);
 
@@ -1025,6 +1078,8 @@ emit_batch(const struct liszt_options *o, const struct litem *items,
             if (items[i].stat_ok)
                 total += (uintmax_t)items[i].st->blocks;
         char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
+        if (dired_on)
+            liszt_emit_str("  ");
         liszt_emit_str("total ");
         liszt_emit_str(liszt_human_readable(total, hbuf,
                                             o->human_output_opts,
@@ -1145,10 +1200,16 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
         size_t hlen;
         int hwidth;
         bool hquoted;
+        if (dired_on)
+            liszt_emit_str("  ");
         const char *hq = liszt_quote_name(name, &o->dirname_qopts,
                                           o->qmark_funny_chars, false,
                                           &hlen, &hwidth, &hquoted);
+        if (dired_on)
+            dired_push(&dired_subdirs);
         liszt_emit_bytes(hq, hlen);
+        if (dired_on)
+            dired_push(&dired_subdirs);
         liszt_emit_str(":\n");
     }
 
@@ -1182,6 +1243,7 @@ main(int argc, char **argv)
     liszt_options_parse(argc, argv, &o);
     cur_opts = &o;
     liszt_xstat_time_type(o.time_type);
+    dired_on = o.dired;
 
     if (o.print_with_color) {
         liszt_colors_parse(&o.print_with_color);
@@ -1316,6 +1378,14 @@ main(int argc, char **argv)
     if (o.print_with_color && liszt_color_used()
         && !liszt_color_restore_is_noop())
         liszt_color_restore_default();
+
+    if (dired_on) {
+        dired_dump("//DIRED//", &dired_names);
+        dired_dump("//SUBDIRED//", &dired_subdirs);
+        liszt_emit_str("//DIRED-OPTIONS// --quoting-style=");
+        liszt_emit_str(liszt_quoting_style_word(o.quoting_style));
+        liszt_emit_byte('\n');
+    }
 
     int werr;
     if (liszt_emit_finish(&werr) < 0) {

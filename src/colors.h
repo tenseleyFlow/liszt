@@ -52,6 +52,10 @@ struct liszt_colorable {
 /* get_color_indicator: the escape to paint with, or NULL. */
 const struct liszt_binstr *liszt_color_for(const struct liszt_colorable *c);
 
+/* Bytes of escape sequences emitted so far: color output is invisible
+   to dired offsets, which count everything else. */
+off_t liszt_color_bytes(void);
+
 /* Emission (put_indicator and friends); track first use for teardown. */
 void liszt_color_put(const struct liszt_binstr *s);
 void liszt_color_put_ind(enum liszt_cind ind);

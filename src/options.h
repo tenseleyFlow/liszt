@@ -74,6 +74,7 @@ struct liszt_options {
     int file_human_output_opts;
     uintmax_t file_output_block_size;
     /* Layout and quoting (sprint 04). */
+    bool dired;                 /* -D after self-disable rules */
     char eolbyte;               /* '\n'; --zero makes it NUL */
     size_t line_length;         /* 0 = unlimited */
     size_t max_idx;
@@ -94,5 +95,9 @@ struct liszt_options {
    (0), parse errors (2, GNU-shaped diagnostics), and options whose
    sprint has not landed yet (2). On return *o is fully resolved. */
 void liszt_options_parse(int argc, char **argv, struct liszt_options *o);
+
+/* The --quoting-style word for STYLE (GNU quoting_style_args order),
+   for the //DIRED-OPTIONS// line. */
+const char *liszt_quoting_style_word(enum liszt_qstyle style);
 
 #endif

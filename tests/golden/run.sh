@@ -802,6 +802,29 @@ run_case 8 "zero unlimited width" C 0 -- --zero -w0 -C "$work/zdir"
 run_case 8 "zero utf8" "$U8" 0 -- --zero "$work/zdir"
 run_case_color "$DEFCOLORS" 8 "zero color re-enabled" C 0 -- --zero --color=always "$work/zdir"
 
+# 08B: --dired. Offsets count every byte except escape sequences; the
+# quoting-heavy fixture makes escapes shift name spans, and -R plus
+# multi-operand runs exercise //SUBDIRED//. Long lines, headers, and
+# the total line carry the two-space dired indent.
+ln -s "b c" "$work/zdir/zlink" 2>/dev/null || true
+run_case 8 "dired single dir" C 0 -- -D "$work/zdir"
+run_case 8 "dired multi dir" C 0 -- -D "$work/zdir" "$work/zdir/sub"
+run_case 8 "dired file operand" C 0 -- -D "$work/zdir/a"
+run_case 8 "dired mixed operands" C 0 -- -D "$work/zdir/a" "$work/zdir"
+run_case 8 "dired recursive" C 0 -- -DR "$work/zdir"
+run_case 8 "dired all" C 0 -- -Da "$work/zdir"
+run_case 8 "dired escape quoting" C 0 -- -Db "$work/zdir"
+run_case 8 "dired c quoting" C 0 -- -DQ "$work/zdir"
+run_case 8 "dired shell-always" C 0 -- -D --quoting-style=shell-always "$work/zdir"
+run_case 8 "dired self-disable -C" C 0 -- -D -C "$work/zdir"
+run_case 8 "dired frills" C 0 -- -D -si "$work/zdir"
+run_case 8 "dired numeric ids" C 0 -- -Dn "$work/zdir"
+run_case 8 "dired empty dir" C 0 -- -D "$work/empty"
+run_case 8 "dired utf8" "$U8" 0 -- -Db "$work/zdir"
+run_case_pin911 8 "dired zero fatal" C 2 -- -D --zero "$work/zdir"
+run_case_pin911 8 "zero dired fatal" C 2 -- --zero -D "$work/zdir"
+run_case_color "$DEFCOLORS" 8 "dired color uncounted" C 0 -- -D --color=always "$work/zdir"
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y
