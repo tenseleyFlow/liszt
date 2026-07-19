@@ -8,6 +8,11 @@ permanent entry with rationale. Matrix source: bench/run-matrix.sh.
 |---|---|---|
 | (empty) | | |
 
+Extension lanes (v0.2, dev box, 100k flat, 20 runs):
+- icons cost: -1 20.2 -> 21.9ms (+8.4%); --color -1 34.0 -> 35.8ms
+  (+5.3%, at the 5% gate). vs eza --icons --color -1: 182.2ms ->
+  liszt 5.1x faster. GNU-parity matrix re-run: no lane regressed.
+
 Closed entries:
 - macOS -l 100k: was 286ms uncapped-pool vs gls 239ms (E-core
   contention on APFS metadata locks); 208ms (1.14x win) after capping

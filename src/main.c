@@ -204,6 +204,7 @@ struct lwidths {
    command-line operands compile into this. */
 struct litem {
     const char *name;
+    size_t name_len;
     const char *qname;          /* display form (may equal name) */
     size_t qlen;
     int width;                  /* display width, no pad */
@@ -389,11 +390,15 @@ emit_name_colored(const struct litem *it, bool symlink_target,
         struct liszt_icon ic;
         unsigned sp = liszt_icon_spacing();
 
-        liszt_icon_for(&cinfo, &ic);
+        liszt_icon_for(&cinfo, it->name_len, &ic);
         icon_cells = 1 + sp;
         if (ic.len == 0) {
-            for (unsigned k = 0; k < 1 + sp; k++)
-                liszt_emit_byte(' ');
+            liszt_emit_bytes("         ", 1 + sp);   /* sp <= 8 */
+        } else if (color == NULL && !liszt_icon_osc66()) {
+            char ibuf[16];
+            memcpy(ibuf, ic.bytes, ic.len);
+            memset(ibuf + ic.len, ' ', sp);
+            liszt_emit_bytes(ibuf, ic.len + sp);
         } else {
             if (color)
                 liszt_color_start(color);
@@ -404,8 +409,7 @@ emit_name_colored(const struct litem *it, bool symlink_target,
                 liszt_emit_str("\033\\");
             if (color)
                 liszt_color_prep_non_filename();
-            for (unsigned k = 0; k < sp; k++)
-                liszt_emit_byte(' ');
+            liszt_emit_bytes("        ", sp);
         }
     }
 
@@ -795,6 +799,7 @@ static void
 operand_to_litem(const struct operand *op, struct litem *it)
 {
     it->name = op->name;
+    it->name_len = strlen(op->name);
     it->absolute_name = op->absolute_name;
     it->scontext = op->scontext ? op->scontext : "?";
     it->qname = op->qname ? op->qname : op->name;
@@ -1271,6 +1276,7 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
         es->meta ? &es->meta[e->meta_idx] : NULL;
 
     it->name = liszt_entry_name(es, e);
+    it->name_len = e->name_len;
     if (m && m->quoted_off != UINT32_MAX) {
         it->qname = (const char *)es->arena + m->quoted_off;
         it->qlen = m->quoted_len;

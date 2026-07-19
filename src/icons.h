@@ -25,7 +25,7 @@ struct liszt_icon {
 void liszt_icons_init(const struct liszt_options *o);
 
 /* Resolve the icon for one entry. */
-void liszt_icon_for(const struct liszt_colorable *c,
+void liszt_icon_for(const struct liszt_colorable *c, size_t name_len,
                     struct liszt_icon *out);
 
 /* Spacing cells after the glyph (LISZT_ICON_SPACING, default 1). */

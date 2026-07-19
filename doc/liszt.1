@@ -71,6 +71,30 @@ arithmetic. liszt honors the intended clamp (width 0). Quoted styles
 and
 .B \-q
 are unaffected.
+.SH EXTENSIONS
+Beyond the GNU surface, liszt offers extensions - all off by default;
+with none active, output is byte-identical to GNU ls. Extension long
+options match by exact spelling only (no abbreviation).
+.TP
+.BR \-\-icons [=\fIWHEN\fR]
+Prefix each name with a Nerd-Font icon chosen from compiled-in tables
+(exact filename, then directory name, then suffix, then file type).
+.I WHEN
+is
+.BR always ,
+.BR auto ,
+or
+.BR never ;
+bare
+.B \-\-icons
+means
+.B auto
+(icons only when standard output is a terminal). liszt never reads
+directory contents to choose a glyph, and with the builtin tables the
+stat-less listing plan is preserved. Not combinable with
+.B \-\-dired
+(positional last-wins, like
+.BR \-\-hyperlink ).
 .SH ENVIRONMENT
 The GNU-compatible variables
 .BR LS_COLORS ,
@@ -85,6 +109,35 @@ and the locale variables behave as in
 .BR ls (1).
 .PP
 liszt additionally reads:
+.TP
+.B LS_ICONS
+Icon overrides, LS_COLORS-shaped: colon-separated
+.IR key = value
+entries where
+.I key
+is
+.BI * .suffix
+(case-insensitive),
+.IB name /
+(exact directory name),
+a two-letter LS_COLORS file-type label
+.RB ( di ,
+.BR fi ,
+\&...), or an exact filename. Values take the same backslash escapes
+as LS_COLORS; an empty value blanks the icon cell. Unparsable values
+diagnose and fall back to the builtin tables.
+.TP
+.B LISZT_ICONS
+Default WHEN for
+.B \-\-icons
+when the flag is absent.
+.TP
+.BR LISZT_ICON_SPACING " (fallback " EZA_ICON_SPACING )
+Spaces after the glyph, 0-8, default 1.
+.TP
+.B LISZT_ICONS_OSC66
+When 1, wrap each glyph in the kitty text-sizing sequence
+(OSC 66, w=1) so supporting terminals render exactly one cell.
 .TP
 .B LISZT_DEBUG_PLAN
 Print the selected sort engine and stat plan to standard error.

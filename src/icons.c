@@ -29,6 +29,8 @@ struct icon_ov {
 };
 
 static struct icon_ov *ov_list;      /* parse order = priority order */
+static bool have_ov;                 /* any non-label override parsed */
+static bool have_label_ov;
 static char *ov_buf;
 static struct liszt_binstr label_ov[24];    /* by liszt_cind; len -1 unset */
 static bool label_ov_set[24];
@@ -191,6 +193,10 @@ parse_ls_icons(void)
     for (struct icon_ov *o = ov_list; o != NULL; o = o->next)
         ov_bucket_add(o->kind == OV_SUFFIX ? ov_suf_b
                       : o->kind == OV_DIR ? ov_dir_b : ov_name_b, o);
+    have_ov = ov_list != NULL;
+    for (int i = 0; i < 24; i++)
+        if (label_ov_set[i])
+            have_label_ov = true;
 }
 
 void
@@ -257,13 +263,18 @@ ov_lookup(const struct ov_bucket *tab, const char *name, size_t len,
 
 static int
 tab_lookup_exact(const struct licon_ent *tab, const uint16_t *bucket,
-                 const char *pool, const char *name, size_t len)
+                 const uint64_t *lenmask, const char *pool,
+                 const char *name, size_t len)
 {
     if (len == 0)
         return -1;
     unsigned char last = fold_b((unsigned char)name[len - 1]);
+    uint64_t lbit = 1ULL << (len < 63 ? len : 63);
+    if ((lenmask[last] & lbit) == 0)
+        return -1;
     for (uint16_t i = bucket[last]; i < bucket[last + 1]; i++)
         if (tab[i].key_len == len
+            && pool[tab[i].key_off] == name[0]
             && memcmp(pool + tab[i].key_off, name, len) == 0)
             return tab[i].glyph;
     return -1;
@@ -301,11 +312,11 @@ out_ov(struct liszt_icon *out, const struct icon_ov *ov)
 }
 
 void
-liszt_icon_for(const struct liszt_colorable *c, struct liszt_icon *out)
+liszt_icon_for(const struct liszt_colorable *c, size_t len,
+               struct liszt_icon *out)
 {
     enum liszt_cind class = liszt_file_class(c);
     const char *name = c->name;
-    size_t len = strlen(name);
     const struct icon_ov *ov;
     int g;
 
@@ -317,12 +328,14 @@ liszt_icon_for(const struct liszt_colorable *c, struct liszt_icon *out)
         || class == LISZT_C_STICKY_OTHER_WRITABLE;
 
     if (is_dir) {
-        if ((ov = ov_lookup(ov_dir_b, name, len, false)) != NULL) {
+        if (have_ov
+            && (ov = ov_lookup(ov_dir_b, name, len, false)) != NULL) {
             out_ov(out, ov);
             return;
         }
         if ((g = tab_lookup_exact(licon_dir_tab, licon_dir_bucket,
-                                  licon_dir_pool, name, len)) >= 0) {
+                                  licon_dir_lenmask, licon_dir_pool,
+                                  name, len)) >= 0) {
             out_glyph(out, g);
             return;
         }
@@ -330,23 +343,31 @@ liszt_icon_for(const struct liszt_colorable *c, struct liszt_icon *out)
                || class == LISZT_C_SETUID || class == LISZT_C_SETGID
                || class == LISZT_C_MULTIHARDLINK
                || class == LISZT_C_CAP) {
-        if ((ov = ov_lookup(ov_name_b, name, len, false)) != NULL) {
+        if (have_ov
+            && (ov = ov_lookup(ov_name_b, name, len, false)) != NULL) {
             out_ov(out, ov);
             return;
         }
         if ((g = tab_lookup_exact(licon_name_tab, licon_name_bucket,
-                                  licon_name_pool, name, len)) >= 0) {
+                                  licon_name_lenmask, licon_name_pool,
+                                  name, len)) >= 0) {
             out_glyph(out, g);
             return;
         }
-        if ((ov = ov_lookup(ov_suf_b, name, len, true)) != NULL) {
-            out_ov(out, ov);
-            return;
-        }
-        if ((g = tab_lookup_suffix(licon_ext_tab, licon_ext_bucket,
-                                   licon_ext_pool, name, len)) >= 0) {
-            out_glyph(out, g);
-            return;
+        /* Every suffix key contains a dot: dotless names can skip the
+           suffix walks outright (the common miss in big flat dirs). */
+        if (memchr(name, '.', len) != NULL) {
+            if (have_ov
+                && (ov = ov_lookup(ov_suf_b, name, len, true)) != NULL) {
+                out_ov(out, ov);
+                return;
+            }
+            if ((g = tab_lookup_suffix(licon_ext_tab, licon_ext_bucket,
+                                       licon_ext_pool, name,
+                                       len)) >= 0) {
+                out_glyph(out, g);
+                return;
+            }
         }
     }
 
@@ -354,7 +375,7 @@ liszt_icon_for(const struct liszt_colorable *c, struct liszt_icon *out)
        else fi. */
     for (int probe = 0; probe < 2; probe++) {
         enum liszt_cind k = probe == 0 ? class : LISZT_C_FILE;
-        if (label_ov_set[k]) {
+        if (have_label_ov && label_ov_set[k]) {
             out->bytes = label_ov[k].string;
             out->len = (unsigned)label_ov[k].len;
             return;

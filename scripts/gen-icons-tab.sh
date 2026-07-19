@@ -184,6 +184,22 @@ END {
             if (b % 16 == 15) printf "\n    "
         }
         printf "\n};\n\n"
+
+        # Per-bucket key-length bitmask (bit 63 = any longer length):
+        # exact-match probes skip whole walks when no candidate shares
+        # the probe length.
+        printf "static const uint64_t licon_%s_lenmask[256] = {\n    ", tname[t]
+        for (b = 0; b < 256; b++) {
+            mask = 0
+            for (i = bstart[b]; i < bstart[b + 1]; i++) {
+                l = length(K[t, order[t, i]])
+                if (l > 63) l = 63
+                mask = or(mask, lshift(1, l))
+            }
+            printf "0x%xULL,", mask
+            if (b % 4 == 3) printf "\n    "
+        }
+        printf "\n};\n\n"
         delete border; delete blist; delete bstart
     }
 

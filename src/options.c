@@ -370,6 +370,10 @@ print_help(void)
     printf("binary under a shorter name. The full GNU ls 9.11 option surface is\n");
     printf("supported with byte-identical output under a pinned environment;\n");
     printf("see ls(1) for option semantics.\n");
+    printf("\n");
+    printf("Extensions (exact spelling, off by default; see liszt(1)):\n");
+    printf("      --icons[=WHEN]      Nerd-Font icons (always, auto, never);\n");
+    printf("                          LS_ICONS overrides, LISZT_ICON_SPACING\n");
     exit(LISZT_STATUS_OK);
 }
 
