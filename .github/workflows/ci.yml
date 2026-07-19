@@ -84,5 +84,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "liszt ${GITHUB_REF_NAME}" \
-            --notes "Byte-identical to GNU ls 9.11 under a pinned environment; faster on every measured workload on both release machines (see bench/release/ in the tree for the stored matrices). Full golden, fuzz, and sanitizer gates green on Linux (glibc, musl), macOS, and FreeBSD." \
+            --notes "Byte-identical to GNU ls 9.11 under a pinned environment with no extension flag active; faster on every measured workload on both release machines. v0.2 extensions, all off by default: Nerd-Font icons (--icons, LS_ICONS overrides, OSC 66), tree mode (--tree, one fd at any depth), and a dependency-free git status column (--git, index parsed directly, nothing hashed) - each measured 4-16x faster than the eza equivalents (bench/release/ in the tree). Full golden, fuzz, and sanitizer gates green on Linux (glibc, musl), macOS, and FreeBSD." \
             liszt-*.tar.gz SHA256SUMS
