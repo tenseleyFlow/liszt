@@ -130,7 +130,7 @@ file_escape(const char *str, bool path)
                  || b == '.' || b == '_')
             *p++ = (char)b;
         else
-            p += sprintf(p, "%%%02x", b);
+            p += snprintf(p, 4, "%%%02x", b);
     }
     *p = '\0';
     return esc;
