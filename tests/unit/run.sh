@@ -62,6 +62,18 @@ lz:*) : ;;
 esac
 checks=$((checks + 1))
 
+# Fixture generator is deterministic: same seed, same manifest.
+fixwork=$(mktemp -d "${TMPDIR:-/tmp}/liszt-fix.XXXXXX")
+trap 'chmod -R u+rwx "$fixwork" 2>/dev/null; rm -rf "$fixwork"' EXIT INT TERM
+h1=$(sh tests/fixtures/generate.sh "$fixwork/a" 42 | sed -n 's/^MANIFEST_SHA256 //p')
+h2=$(sh tests/fixtures/generate.sh "$fixwork/b" 42 | sed -n 's/^MANIFEST_SHA256 //p')
+h3=$(sh tests/fixtures/generate.sh "$fixwork/a" 7 | sed -n 's/^MANIFEST_SHA256 //p')
+check_eq "fixture generator deterministic per seed" "$h1" "$h2"
+checks=$((checks + 1))
+if [ -z "$h1" ] || [ "$h1" = "$h3" ]; then
+    note_fail "fixture generator seed variation (seed42=$h1 seed7=$h3)"
+fi
+
 # Makefile SRC list matches the files on disk (unwired sources fail loudly).
 listed=$(sed -n '/^SRC =/,/^$/p' Makefile | grep -o 'src/[a-z_/]*\.c' | sort)
 ondisk=$(ls src/*.c src/sys/*.c | sort)

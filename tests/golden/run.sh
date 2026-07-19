@@ -110,6 +110,14 @@ if [ -n "$utf8_locale" ]; then
     selftest "list dir rc0 (utf8)" "$utf8_locale" 0 "$oracle" -1 "$work/smoke/dir"
 fi
 
+# Oracle over the full core fixture: same instance, twice, byte-identical.
+sh tests/fixtures/generate.sh "$work/fix" 42 >/dev/null
+selftest "core fixture -1aR" C 1 "$oracle" -1aR "$work/fix/core"
+selftest "core fixture -laR" C 1 "$oracle" -laR "$work/fix/core"
+if [ -n "$utf8_locale" ]; then
+    selftest "core fixture -1aR (utf8)" "$utf8_locale" 1 "$oracle" -1aR "$work/fix/core"
+fi
+
 # Normalization self-test: any program token collapses to PROG:.
 for tok in ls gls liszt lz; do
     got=$(printf '%s: cannot access\n' "$tok" | normprog)
