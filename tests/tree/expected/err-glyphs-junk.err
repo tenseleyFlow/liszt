@@ -1,0 +1,6 @@
+PROG: invalid argument 'bogus' for '--tree-glyphs'
+PROG:
+  - 'unicode'
+  - 'ascii'
+  - 'auto'
+Try 'PROG --help' for more information.

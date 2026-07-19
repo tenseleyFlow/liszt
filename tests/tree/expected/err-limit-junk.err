@@ -1,0 +1,2 @@
+PROG: invalid --tree-limit argument '2x'
+Try 'PROG --help' for more information.

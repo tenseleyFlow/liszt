@@ -57,13 +57,16 @@ config.mk config.h: configure
 %.o: %.c config.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-check: unit golden fuzz-smoke perf-smoke
+check: unit golden tree fuzz-smoke perf-smoke
 
 unit: all
 	sh tests/unit/run.sh
 
 golden: all
 	sh tests/golden/run.sh || test $$? -eq 77
+
+tree: all
+	sh tests/tree/run.sh || test $$? -eq 77
 
 fuzz-smoke: all
 	FUZZ_TRIALS=25 sh tests/fuzz/run.sh || test $$? -eq 77
@@ -114,7 +117,7 @@ distclean: clean
 	rm -f config.h config.mk liszt-*.tar.gz
 	rm -rf build
 
-.PHONY: all check unit golden fuzz fuzz-smoke perf-smoke sanitize dist \
+.PHONY: all check unit golden tree fuzz fuzz-smoke perf-smoke sanitize dist \
 	distcheck install clean distclean
 
 -include $(DEP)

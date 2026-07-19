@@ -1,0 +1,2 @@
+PROG: --tree-limit requires --tree
+Try 'PROG --help' for more information.
