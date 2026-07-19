@@ -31,7 +31,14 @@ fixture="$benchdir/flat-$n"
 if [ ! -d "$fixture" ]; then
     sh bench/mkperf.sh "$fixture" "$n" 42
 fi
-fixture_hash=$(cd "$fixture" && ls -A | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+if command -v sha256sum >/dev/null 2>&1; then
+    hash_stdin() { sha256sum | cut -d' ' -f1; }
+elif command -v shasum >/dev/null 2>&1; then
+    hash_stdin() { shasum -a 256 | cut -d' ' -f1; }
+else
+    hash_stdin() { sha256 -q; }
+fi
+fixture_hash=$(cd "$fixture" && ls -A | LC_ALL=C sort | hash_stdin)
 
 stamp=$(date -u +%Y%m%d%H%M%S)
 mkdir -p bench/results
@@ -71,14 +78,27 @@ if command -v hyperfine >/dev/null 2>&1; then
     hyperfine --warmup 2 --runs "${LISZT_BENCH_RUNS:-5}" \
         --export-json "${out%.txt}.json" "$@" >> "$out" 2>&1
 else
-    # Fallback: three timed runs per row, wall clock via date, min kept.
+    # Fallback: three timed runs per row, min kept. BSD date lacks %N, so
+    # granularity degrades to whole seconds there.
+    case "$(date +%N)" in
+    *N*) ns=0 ;;
+    *) ns=1 ;;
+    esac
     for cmd in "$@"; do
         best=""
         i=0
         while [ "$i" -lt 3 ]; do
-            t0=$(date +%s%N)
+            if [ "$ns" -eq 1 ]; then
+                t0=$(date +%s%N)
+            else
+                t0=$(($(date +%s) * 1000000000))
+            fi
             sh -c "$cmd" > /dev/null 2>&1
-            t1=$(date +%s%N)
+            if [ "$ns" -eq 1 ]; then
+                t1=$(date +%s%N)
+            else
+                t1=$(($(date +%s) * 1000000000))
+            fi
             dt=$(((t1 - t0) / 1000000))
             if [ -z "$best" ] || [ "$dt" -lt "$best" ]; then
                 best=$dt

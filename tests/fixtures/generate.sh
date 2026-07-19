@@ -37,8 +37,27 @@ fi
 rm -rf "$root"
 mkdir -p "$root"
 
-old_ts="2020-01-15 12:00:00 UTC"
-recent_ts="$(date -u +%Y-%m-%d) 00:00:00 UTC"
+# ISO-8601 with T and Z: the one -d format both GNU and BSD touch accept.
+old_ts="2020-01-15T12:00:00Z"
+recent_ts="$(date -u +%Y-%m-%d)T00:00:00Z"
+
+# Portable helpers: GNU vs BSD stat, and the sha256 tool of the platform.
+if stat -c '%n' . >/dev/null 2>&1; then
+    stat_line() { LC_ALL=C stat -c '%n|%F|%a|%Y' "$1" 2>/dev/null; }
+    stat_size() { LC_ALL=C stat -c '%s' "$1" 2>/dev/null; }
+else
+    stat_line() { LC_ALL=C stat -f '%N|%HT|%Lp|%m' "$1" 2>/dev/null; }
+    stat_size() { LC_ALL=C stat -f '%z' "$1" 2>/dev/null; }
+fi
+sha256_of_stdin() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | cut -d' ' -f1
+    else
+        sha256 -q
+    fi
+}
 
 # --- plain names and name shapes -----------------------------------------
 
@@ -78,6 +97,7 @@ for n in 'sp ace' ' lead' 'trail ' 'two  sp' "sq'uote" 'dq"uote' 'back\slash' \
 done
 
 # Control bytes (no slash, no NUL): tab, newline, CR, ESC, bell, DEL, 0x01.
+# Octal escapes only in printf: \xHH is not POSIX.
 printf 'c\n' > "$root/shapes/$(printf 'tab\tin')"
 printf 'c\n' > "$root/shapes/$(printf 'nl\nin')"
 printf 'c\n' > "$root/shapes/$(printf 'cr\rin')"
@@ -92,15 +112,15 @@ printf 'u\n' > "$root/shapes/naïve"
 printf 'u\n' > "$root/shapes/日本語ファイル"
 printf 'u\n' > "$root/shapes/中文名"
 printf 'u\n' > "$root/shapes/한국어"
-printf 'u\n' > "$root/shapes/$(printf 'combo e\xcc\x81 mark')"
-printf 'u\n' > "$root/shapes/$(printf 'zw\xe2\x80\x8djoin')"
+printf 'u\n' > "$root/shapes/$(printf 'combo e\314\201 mark')"
+printf 'u\n' > "$root/shapes/$(printf 'zw\342\200\215join')"
 printf 'u\n' > "$root/shapes/עברית"
 printf 'u\n' > "$root/shapes/école"
-printf 'u\n' > "$root/shapes/$(printf 'emoji \xf0\x9f\x8e\xbc')"
+printf 'u\n' > "$root/shapes/$(printf 'emoji \360\237\216\274')"
 
 # Invalid multibyte: lone continuation, truncated sequence, overlong-ish,
 # stray 0xFF. Skip cleanly where the fs refuses.
-for esc in 'inv \x80 lone' 'inv \xc3 trunc' 'inv \xe2\x82 short' 'inv \xff ff'; do
+for esc in 'inv \200 lone' 'inv \303 trunc' 'inv \342\202 short' 'inv \377 ff'; do
     n=$(printf "$esc")
     { printf 'i\n' > "$root/shapes/$n"; } 2>/dev/null || true
 done
@@ -184,7 +204,7 @@ printf 'p\n' > "$root/perm/exec-only/inside"
 # the recent-side files are re-touched. Dir mtimes stay old: utimensat on
 # a child does not modify the parent. chmod restrictions come after.
 find "$root" -depth -print0 | xargs -0 touch -h -d "$old_ts"
-touch -d "1970-01-02 00:00:00 UTC" "$root/times/old-epochish"
+touch -d "1970-01-02T00:00:00Z" "$root/times/old-epochish"
 touch -d "$recent_ts" "$root/times/recent-a" "$root/times/recent-b"
 
 chmod 000 "$root/perm/no-access"
@@ -198,15 +218,16 @@ chmod 111 "$root/perm/exec-only"
 chmod 755 "$root/perm/no-access" "$root/perm/exec-only"
 manifest=$(
     cd "$dest" && find core -print | LC_ALL=C sort | while IFS= read -r p; do
-        LC_ALL=C stat -c '%n|%F|%a|%Y' "$p" 2>/dev/null || true
-        case $(LC_ALL=C stat -c '%F' "$p" 2>/dev/null) in
-        "regular file") LC_ALL=C stat -c 'size|%s' "$p" ;;
-        "symbolic link") printf 'target|%s\n' "$(readlink "$p")" ;;
-        esac
+        stat_line "$p" || true
+        if [ -h "$p" ]; then
+            printf 'target|%s\n' "$(readlink "$p")"
+        elif [ -f "$p" ]; then
+            printf 'size|%s\n' "$(stat_size "$p")"
+        fi
     done
 )
 chmod 000 "$root/perm/no-access"
 chmod 111 "$root/perm/exec-only"
 
-hash=$(printf '%s\n' "$manifest" | sha256sum | cut -d' ' -f1)
+hash=$(printf '%s\n' "$manifest" | sha256_of_stdin)
 printf 'MANIFEST_SHA256 %s\n' "$hash"
