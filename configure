@@ -4,7 +4,7 @@
 
 set -e
 
-LISZT_VERSION="0.0.1"
+LISZT_VERSION="0.1.0"
 
 cc="${CC:-cc}"
 mkdir -p build
