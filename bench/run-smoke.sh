@@ -91,6 +91,14 @@ row_names="$row_names oracle_l_C liszt_l_C"
 set -- "$@" \
     "env LC_ALL=C $oracle -l $fixture" \
     "env LC_ALL=C ./liszt -l $fixture"
+# The decoration lane (sprint 05), default dircolors scheme.
+lsc=$(dircolors -b 2>/dev/null | sed -n "s/^LS_COLORS='\(.*\)';\$/\1/p")
+if [ -n "$lsc" ]; then
+    row_names="$row_names oracle_colorF_C liszt_colorF_C"
+    set -- "$@" \
+        "env LC_ALL=C LS_COLORS=$lsc $oracle --color=always -F $fixture" \
+        "env LC_ALL=C LS_COLORS=$lsc ./liszt --color=always -F $fixture"
+fi
 row_names="$row_names liszt_startup"
 set -- "$@" "./liszt --version"
 

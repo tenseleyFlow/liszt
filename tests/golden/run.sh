@@ -472,6 +472,75 @@ if [ 4 -le "$active" ]; then
     done
 fi
 
+# 05: color and indicators. Custom schemes pass through run_pinned's
+# LS_COLORS override; the default scheme comes from the oracle-side
+# dircolors so both tools read identical bytes.
+DEFCOLORS=$(dircolors -b 2>/dev/null | sed -n "s/^LS_COLORS='\(.*\)';\$/\1/p")
+run_case_color() {
+    lsc="$1"
+    shift
+    tag="$1" desc="$2" lc="$3" wantrc="$4"
+    shift 4
+    [ "$1" = "--" ] && shift
+    [ "$tag" -le "$active" ] || return 0
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS="$lsc" \
+        LISZT_DEBUG_VERIFY=1 \
+        "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
+    urc=$?
+    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS="$lsc" \
+        "$oracle" "$@" > "$work/o.out" 2> "$work/o.raw"
+    orc=$?
+    normprog < "$work/u.raw" > "$work/u.err"
+    normprog < "$work/o.raw" > "$work/o.err"
+    ok=1
+    [ "$urc" -eq "$orc" ] || ok=0
+    cmp -s "$work/u.out" "$work/o.out" || ok=0
+    cmp -s "$work/u.err" "$work/o.err" || ok=0
+    [ "$wantrc" = "-" ] || [ "$urc" -eq "$wantrc" ] || ok=0
+    if [ "$ok" -ne 1 ]; then
+        echo "CASE FAIL [$desc] (lc=$lc rc uut=$urc oracle=$orc)" >&2
+        diff "$work/o.out" "$work/u.out" | head -6 | cat -v >&2
+        fails=$((fails + 1))
+    fi
+}
+
+run_case_color "$DEFCOLORS" 5 "color default links" C 0 -- --color=always -1a "$fix/links"
+run_case_color "$DEFCOLORS" 5 "color default meta" C 0 -- --color=always -1a "$fix/meta"
+run_case_color "$DEFCOLORS" 5 "color default versions" C 0 -- --color=always -1 "$fix/versions"
+run_case_color "$DEFCOLORS" 5 "color default perm" C 0 -- --color=always -1a "$fix/perm"
+run_case_color "$DEFCOLORS" 5 "color -l links" C 0 -- --color=always -la "$fix/links"
+run_case_color "$DEFCOLORS" 5 "color -C links" C 0 -- --color=always -Ca -w 60 "$fix/links"
+run_case_color "$DEFCOLORS" 5 "color -C sizes" C 0 -- --color=always -C -w 80 "$fix/sizes"
+run_case_color "$DEFCOLORS" 5 "color classify" C 0 -- --color=always -1aF "$fix/meta"
+run_case_color "$DEFCOLORS" 5 "color utf8 links" "$U8" 0 -- --color=always -1a "$fix/links"
+run_case_color "$DEFCOLORS" 5 "color dict versions" "$D8" 0 -- --color=always -1 "$fix/versions"
+run_case_color "di=1;35:ln=target:or=41:mi=05;37;41:*.tar.gz=01;31:*.GZ=01;33:ex=00" \
+    5 "custom ln=target orphans" C 0 -- --color=always -1a "$fix/links"
+run_case_color "di=1;35:ln=target:or=41:mi=05;37;41:*.tar.gz=01;31:*.GZ=01;33:ex=00" \
+    5 "custom ln=target -l" C 0 -- --color=always -la "$fix/links"
+run_case_color "*.txt=35:*.TXT=36:*.txt=34" 5 "suffix precedence case" C 0 -- --color=always -1 "$fix/versions"
+run_case_color "di=01;34:bogus" 5 "malformed trailing entry" C 0 -- --color=always -1 "$fix/plain"
+run_case_color "xx=99" 5 "unknown prefix warns" C 0 -- --color=always -1 "$fix/plain"
+run_case_color "di=01;34:no=00;36" 5 "norm color" C 0 -- --color=always -1a "$fix/links"
+run_case_color "di=01;34:ec=\e[0m" 5 "explicit end code" C 0 -- --color=always -1a "$fix/links"
+run_case_color "$DEFCOLORS" 5 "color operands mix" C 0 -- --color=always -1 "$fix/links/good" "$fix/plain"
+
+# 05: indicators without color.
+run_case 5 "classify -F meta" C 0 -- -1aF "$fix/meta"
+run_case 5 "classify -F links" C 0 -- -1aF "$fix/links"
+run_case 5 "slash -p" C 0 -- -1ap "$fix/meta"
+run_case 5 "file-type" C 0 -- -1a --file-type "$fix/links"
+run_case 5 "indicator-style words" C 0 -- -1a --indicator-style=file-type "$fix/meta"
+run_case 5 "classify WHEN never" C 0 -- -1a --classify=never "$fix/meta"
+run_case 5 "classify WHEN always" C 0 -- -1a --classify=always "$fix/links"
+run_case 5 "-F columns" C 0 -- -CaF -w 80 "$fix/meta"
+run_case 5 "-F long" C 0 -- -laF "$fix/links"
+run_case 5 "-F sort width regolden" C 0 -- -1a --sort=width -F "$fix/shapes"
+run_case 5 "-F operands" C 0 -- -F -1 "$fix/links/good" "$fix/meta/exec"
+run_case 5 "-p versions" C 0 -- -1p "$fix/versions"
+run_case 5 "color auto piped" C 0 -- --color=auto -1a "$fix/links"
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

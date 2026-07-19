@@ -229,3 +229,21 @@ liszt_filemodestring(mode_t mode, char str[12])
     str[10] = ' ';
     str[11] = '\0';
 }
+
+int
+liszt_strncasecmp_c(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        unsigned char ca = (unsigned char)a[i];
+        unsigned char cb = (unsigned char)b[i];
+        if (ca >= 'A' && ca <= 'Z')
+            ca += 'a' - 'A';
+        if (cb >= 'A' && cb <= 'Z')
+            cb += 'a' - 'A';
+        if (ca != cb)
+            return ca < cb ? -1 : 1;
+        if (ca == 0)
+            return 0;
+    }
+    return 0;
+}

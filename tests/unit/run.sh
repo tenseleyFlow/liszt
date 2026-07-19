@@ -67,6 +67,21 @@ fmt_out=$(./liszt -U --format=single-column "$udir")
 one_out=$(./liszt -U1 "$udir")
 check_eq "--format=single-column equals -1" "$one_out" "$fmt_out"
 check_status "width sort works" 0 ./liszt --sort=width "$udir"
+check_status "color always works" 0 env LS_COLORS="di=01;34" ./liszt --color=always "$udir"
+check_status "classify works" 0 ./liszt -F "$udir"
+
+# Statless color plan: a scheme observing nothing beyond d_type must
+# perform zero per-entry stats (one statx total: the operand classify).
+if command -v strace >/dev/null 2>&1; then
+    checks=$((checks + 1))
+    nstx=$(strace -c -e trace=statx env LC_ALL=C \
+        LS_COLORS="di=01;34:ln=01;36:ex=00:su=00:sg=00:ow=00:st=00:tw=00:or=00:mi=00:ca=00" \
+        ./liszt --color=always "$udir" 2>&1 >/dev/null \
+        | sed -n 's/.* \([0-9][0-9]*\) *statx$/\1/p' | tail -1)
+    if [ "${nstx:-99}" -gt 1 ]; then
+        note_fail "statless color scheme performed $nstx statx calls"
+    fi
+fi
 check_status "columns work piped" 0 ./liszt -C "$udir"
 check_status "commas work" 0 ./liszt -m "$udir"
 err=$(./liszt /liszt-no-such 2>&1 >/dev/null)

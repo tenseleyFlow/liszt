@@ -41,6 +41,7 @@ trap 'rm -rf "$work"' EXIT INT TERM
 faildir="tests/.work/fuzz-failures"
 
 cp ./liszt "$work/liszt.uut"
+FUZZ_LSC=$(dircolors -b 2>/dev/null | sed -n "s/^LS_COLORS='\(.*\)';\$/\1/p")
 
 normprog() {
     sed -e 's/^[^:][^:]*:/PROG:/' \
@@ -146,6 +147,13 @@ gen_plan() {
         if (qmark) flags = flags " -q"
         if (widthsort < 0.1) flags = flags " --sort=width"
         p = rand()
+        if (p < 0.25) flags = flags " --color=always"
+        else if (p < 0.3) flags = flags " --color=auto"
+        p = rand()
+        if (p < 0.15) flags = flags " -F"
+        else if (p < 0.25) flags = flags " -p"
+        else if (p < 0.32) flags = flags " --file-type"
+        p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
         # Long-lane extras compose with any format (frills) or -l.
@@ -227,11 +235,12 @@ EOF
         set -- $flags "$@"
     fi
 
-    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
-        LISZT_DEBUG_VERIFY=1 \
+    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+        LS_COLORS="$FUZZ_LSC" LISZT_DEBUG_VERIFY=1 \
         "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
     urc=$?
-    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
+    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+        LS_COLORS="$FUZZ_LSC" \
         "$oracle" "$@" > "$work/o.out" 2> "$work/o.raw"
     orc=$?
     normprog < "$work/u.raw" > "$work/u.err"

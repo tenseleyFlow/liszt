@@ -27,6 +27,13 @@ enum liszt_sortword {
     LISZT_SORT_NONE
 };
 
+enum liszt_indicator_style {
+    LISZT_IND_NONE = 0,
+    LISZT_IND_SLASH,        /* -p */
+    LISZT_IND_FILE_TYPE,    /* --file-type */
+    LISZT_IND_CLASSIFY      /* -F */
+};
+
 enum liszt_deref {
     LISZT_DEREF_UNDEFINED = 0,
     LISZT_DEREF_NEVER,
@@ -62,6 +69,8 @@ struct liszt_options {
     size_t max_idx;
     size_t tabsize;
     enum liszt_qstyle quoting_style;
+    bool print_with_color;
+    enum liszt_indicator_style indicator_style;
     bool qmark_funny_chars;
     bool align_variable_outer_quotes;
     struct liszt_qopts filename_qopts;

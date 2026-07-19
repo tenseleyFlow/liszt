@@ -143,10 +143,35 @@ struct staging {
     uintmax_t output_block_size;    /* 0 = unset, resolve from env */
     int file_human_output_opts;
     uintmax_t file_output_block_size;
+    bool print_with_color;
+    int indicator_style;            /* enum liszt_indicator_style */
     int quoting_style_opt;          /* -1 unset */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
+};
+
+/* WHEN words (--color/--classify, later --hyperlink), GNU order. */
+static const char *const when_words[] = {
+    "always", "yes", "force", "never", "no", "none", "auto", "tty",
+    "if-tty"
+};
+enum { N_WHEN_WORDS = sizeof when_words / sizeof when_words[0] };
+enum { WHEN_ALWAYS = 0, WHEN_NEVER = 1, WHEN_IF_TTY = 2 };
+static const int when_vals[] = {
+    WHEN_ALWAYS, WHEN_ALWAYS, WHEN_ALWAYS,
+    WHEN_NEVER, WHEN_NEVER, WHEN_NEVER,
+    WHEN_IF_TTY, WHEN_IF_TTY, WHEN_IF_TTY
+};
+
+/* --indicator-style words, GNU order. */
+static const char *const indstyle_words[] = {
+    "none", "slash", "file-type", "classify"
+};
+enum { N_INDSTYLE_WORDS = sizeof indstyle_words / sizeof indstyle_words[0] };
+static const int indstyle_vals[] = {
+    LISZT_IND_NONE, LISZT_IND_SLASH, LISZT_IND_FILE_TYPE,
+    LISZT_IND_CLASSIFY
 };
 
 /* --quoting-style words, GNU order. */
@@ -351,6 +376,36 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case 'q':
         st->hide_control_chars_opt = 1;
+        break;
+    case KEY_COLOR: {
+        int when = value
+            ? argmatch_die("--color", value, when_words, when_vals,
+                           N_WHEN_WORDS)
+            : WHEN_ALWAYS;
+        st->print_with_color = when == WHEN_ALWAYS
+            || (when == WHEN_IF_TTY && isatty(STDOUT_FILENO));
+        break;
+    }
+    case 'F': {
+        int when = value
+            ? argmatch_die("--classify", value, when_words, when_vals,
+                           N_WHEN_WORDS)
+            : WHEN_ALWAYS;
+        if (when == WHEN_ALWAYS
+            || (when == WHEN_IF_TTY && isatty(STDOUT_FILENO)))
+            st->indicator_style = LISZT_IND_CLASSIFY;
+        break;
+    }
+    case 'p':
+        st->indicator_style = LISZT_IND_SLASH;
+        break;
+    case KEY_FILE_TYPE:
+        st->indicator_style = LISZT_IND_FILE_TYPE;
+        break;
+    case KEY_INDICATOR_STYLE:
+        st->indicator_style =
+            argmatch_die("--indicator-style", value, indstyle_words,
+                         indstyle_vals, N_INDSTYLE_WORDS);
         break;
     case KEY_SHOW_CONTROL_CHARS:
         st->hide_control_chars_opt = 0;
@@ -575,6 +630,8 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .output_block_size = 0,
         .file_human_output_opts = 0,
         .file_output_block_size = 0,
+        .print_with_color = false,
+        .indicator_style = LISZT_IND_NONE,
         .quoting_style_opt = -1,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
@@ -657,18 +714,24 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         o->sort = LISZT_SORT_TIME;
     else
         o->sort = LISZT_SORT_NAME;
-    o->deref = (o->immediate_dirs || o->format == LISZT_FMT_LONG)
+    o->deref = (o->immediate_dirs
+                || o->indicator_style == LISZT_IND_CLASSIFY
+                || o->format == LISZT_FMT_LONG)
         ? LISZT_DEREF_NEVER
         : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
 
     /* Line length (GNU 2272-2303): -w wins; else tty winsize; else
        COLUMNS (invalid warns and falls through); else 80. -w0 and huge
        values mean unlimited. */
+    o->print_with_color = st.print_with_color;
+    o->indicator_style = (enum liszt_indicator_style)st.indicator_style;
+
     long linelen = st.width_opt;
     bool multi = o->format == LISZT_FMT_MANY
         || o->format == LISZT_FMT_HORIZONTAL
         || o->format == LISZT_FMT_COMMAS;
-    if (multi) {
+    /* Color forces line-length acquisition (GNU 2276). */
+    if (multi || o->print_with_color) {
         if (linelen < 0 && isatty(STDOUT_FILENO)) {
             struct winsize ws;
             if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) >= 0
@@ -754,6 +817,14 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     o->filename_qopts.style = o->quoting_style;
     if (o->quoting_style == LISZT_QS_ESCAPE)
         liszt_set_char_quoting(&o->filename_qopts, ' ', 1);
+    if (o->indicator_style >= LISZT_IND_FILE_TYPE) {
+        /* GNU: &"*=>@|"[indicator_style - file_type] - file-type
+           force-quotes all five, classify skips '*'. */
+        const char *incompat = "*=>@|";
+        for (const char *pc = incompat
+                 + (o->indicator_style - LISZT_IND_FILE_TYPE); *pc; pc++)
+            liszt_set_char_quoting(&o->filename_qopts, *pc, 1);
+    }
     o->dirname_qopts = o->filename_qopts;
     liszt_set_char_quoting(&o->dirname_qopts, ':', 1);
 

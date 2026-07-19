@@ -63,4 +63,8 @@ char *liszt_readlink_join(const char *dir, const char *name);
 long liszt_xattr_list_join(const char *dir, const char *name, char *buf,
                            size_t size);
 
+/* Whether ATTR appears in DIR/NAME's xattr name list (one syscall). */
+bool liszt_xattr_list_has(const char *dir, const char *name,
+                          const char *attr);
+
 #endif

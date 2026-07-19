@@ -1,0 +1,31 @@
+/* Known-TERM fnmatch patterns, extracted from the pinned tree's
+   src/dircolors.h G_line (coreutils 9.11). Regenerate against the
+   ref if the pin moves. */
+static const char *const known_terms[] = {
+    "Eterm",
+    "ansi",
+    "*color*",
+    "con[0-9]*x[0-9]*",
+    "cons25",
+    "console",
+    "cygwin",
+    "*direct*",
+    "dtterm",
+    "gnome",
+    "hurd",
+    "jfbterm",
+    "konsole",
+    "kterm",
+    "linux",
+    "linux-c",
+    "mlterm",
+    "putty",
+    "rxvt*",
+    "screen*",
+    "st",
+    "terminator",
+    "tmux*",
+    "vt100",
+    "vt220",
+    "xterm*",
+};

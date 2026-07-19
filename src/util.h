@@ -63,6 +63,9 @@ void *liszt_xmalloc(size_t n);
 void *liszt_xrealloc(void *p, size_t n);
 char *liszt_xstrdup(const char *s);
 
+/* gnulib c_strncasecmp: ASCII case-insensitive, locale-independent. */
+int liszt_strncasecmp_c(const char *a, const char *b, size_t n);
+
 /* strmode/filemodestring port (gnulib filemode): writes 12 bytes - the
    type letter, nine permission bits with s/S t/T, index 10 = ' ' (the
    POSIX alternate-access slot the -l renderer overwrites), NUL. */

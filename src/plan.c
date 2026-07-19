@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "colors.h"
 #include "sortkey.h"
 #include "sys/xstat.h"
 #include "util.h"
@@ -41,6 +42,53 @@ select_fetch_set(const struct liszt_options *o, struct liszt_plan *p)
     p->stat_wants = wants;
     p->needs_link_target = long_fmt;
     p->needs_xattr = long_fmt;
+    p->stat_dirs_for_color = false;
+    p->stat_exec = false;
+    p->stat_links = false;
+    p->check_symlink_mode = false;
+    p->link_target_mode = false;
+    p->cap_probe = false;
+}
+
+void
+liszt_plan_color_update(const struct liszt_options *o, struct liszt_plan *p)
+{
+    bool color = o->print_with_color;
+    bool long_fmt = o->format == LISZT_FMT_LONG;
+
+    /* GNU main 1688-1697. */
+    p->check_symlink_mode = o->group_directories_first
+        || (color
+            && (liszt_color_is_colored(LISZT_C_ORPHAN)
+                || (liszt_color_is_colored(LISZT_C_EXEC)
+                    && liszt_color_symlink_as_referent())
+                || (liszt_color_is_colored(LISZT_C_MISSING) && long_fmt)));
+
+    /* gobble_file check_stat color terms (ls.c 3342). */
+    p->stat_dirs_for_color = color
+        && (liszt_color_is_colored(LISZT_C_OTHER_WRITABLE)
+            || liszt_color_is_colored(LISZT_C_STICKY)
+            || liszt_color_is_colored(LISZT_C_STICKY_OTHER_WRITABLE));
+    p->stat_exec = o->indicator_style == LISZT_IND_CLASSIFY
+        || (color
+            && (liszt_color_is_colored(LISZT_C_EXEC)
+                || liszt_color_is_colored(LISZT_C_SETUID)
+                || liszt_color_is_colored(LISZT_C_SETGID)));
+    p->stat_links = (o->print_inode || color
+                     || o->indicator_style != LISZT_IND_NONE
+                     || o->group_directories_first)
+        && (o->deref == LISZT_DEREF_ALWAYS
+            || liszt_color_symlink_as_referent()
+            || p->check_symlink_mode);
+    /* Targets need mode when an @-capable indicator or symlink color
+       logic is active (ls.c 3533: file_type <= indicator_style). */
+    p->link_target_mode = o->indicator_style >= LISZT_IND_FILE_TYPE
+        || p->check_symlink_mode;
+    p->needs_link_target = p->needs_link_target || p->check_symlink_mode;
+    p->cap_probe = color && liszt_color_is_colored(LISZT_C_CAP);
+    /* Note: mh coloring gets nlink only when a stat happens anyway -
+       GNU's check_stat has no mh term, so an mh-only scheme silently
+       leaves plain files unstatted. Mirrored, not fixed. */
 }
 
 void

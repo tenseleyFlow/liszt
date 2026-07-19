@@ -203,3 +203,15 @@ liszt_xattr_list_join(const char *dir, const char *name, char *buf,
     return -1;
 #endif
 }
+
+bool
+liszt_xattr_list_has(const char *dir, const char *name, const char *attr)
+{
+    char buf[4096];
+    long n = liszt_xattr_list_join(dir, name, buf, sizeof buf);
+
+    for (long off = 0; off < n; off += (long)strlen(buf + off) + 1)
+        if (strcmp(buf + off, attr) == 0)
+            return true;
+    return false;
+}

@@ -12,6 +12,7 @@
 #include <sys/sysmacros.h>
 #endif
 
+#include "colors.h"
 #include "config.h"
 #include "dirread.h"
 #include "emit.h"
@@ -100,6 +101,8 @@ struct litem {
     unsigned char acl;          /* 0 none, 1 '.', 2 '+' */
     unsigned char quoted;
     unsigned char padded;
+    unsigned char linkok;
+    unsigned char has_capability;
 };
 
 static int
@@ -193,25 +196,117 @@ needs_widths(const struct liszt_options *o)
         || o->sort == LISZT_SORT_WIDTH;
 }
 
-/* The align pad byte, then the display bytes. */
-static void
-emit_name(const struct litem *it)
+/* GNU file_or_link_mode: the mode coloring reads. */
+static mode_t
+file_or_link_mode(const struct litem *it)
 {
-    if (it->padded)
-        liszt_emit_byte(' ');
-    liszt_emit_bytes(it->qname, it->qlen);
+    return (liszt_color_symlink_as_referent() && it->linkok)
+        ? it->linkmode : it->st->mode;
 }
 
-/* Inode and blocks prefixes shared by every format (-i, -s). */
-static void
-emit_frills(const struct liszt_options *o, const struct lwidths *w,
-            const struct litem *it)
+/* print_name_with_quoting's emission: pad, color start, display bytes,
+   color end, clear-to-EOL on possible wrap. Returns the byte length of
+   the name as printed (indicator excluded). For symlink targets the
+   display form is quoted on the fly. */
+static size_t
+emit_name_colored(const struct litem *it, bool symlink_target,
+                  size_t start_col)
+{
+    const char *bytes;
+    size_t blen;
+    bool padded;
+
+    if (symlink_target) {
+        int tw;
+        bool tq;
+        bytes = liszt_quote_name(it->linkname, &cur_opts->filename_qopts,
+                                 cur_opts->qmark_funny_chars, false,
+                                 &blen, &tw, &tq);
+        padded = false;
+    } else {
+        bytes = it->qname;
+        blen = it->qlen;
+        padded = it->padded;
+    }
+
+    const struct liszt_binstr *color = NULL;
+    bool used_this = false;
+    if (cur_opts->print_with_color) {
+        struct liszt_colorable c;
+        if (symlink_target) {
+            c.name = it->linkname;
+            c.mode = it->linkmode;
+            c.linkok = it->linkok ? 0 : -1;
+        } else {
+            c.name = it->name;
+            c.mode = file_or_link_mode(it);
+            c.linkok = it->linkok;
+        }
+        c.ftype = it->ftype;
+        c.stat_ok = it->stat_ok;
+        c.has_capability = it->has_capability;
+        c.multi_hardlink = it->st->nlink > 1;
+        color = liszt_color_for(&c);
+        used_this = color || liszt_color_is_colored(LISZT_C_NORM);
+    }
+
+    if (padded)
+        liszt_emit_byte(' ');
+    if (color)
+        liszt_color_start(color);
+    liszt_emit_bytes(bytes, blen);
+    if (used_this) {
+        liszt_color_prep_non_filename();
+        if (cur_opts->line_length
+            && (start_col / cur_opts->line_length
+                != (start_col + blen - 1) / cur_opts->line_length))
+            liszt_color_put_ind(LISZT_C_CLR_TO_EOL);
+    }
+    return blen;
+}
+
+/* The type indicator character, GNU get_type_indicator. */
+static char
+type_indicator_char(bool stat_ok, mode_t mode, enum liszt_ftype ftype,
+                    enum liszt_indicator_style style)
+{
+    char c;
+
+    if (stat_ok ? S_ISREG(mode) : ftype == LISZT_T_REG) {
+        if (stat_ok && style == LISZT_IND_CLASSIFY
+            && (mode & (S_IXUSR | S_IXGRP | S_IXOTH)))
+            c = '*';
+        else
+            c = 0;
+    } else {
+        if (stat_ok ? S_ISDIR(mode) : ftype == LISZT_T_DIR)
+            c = '/';
+        else if (style == LISZT_IND_SLASH)
+            c = 0;
+        else if (stat_ok ? S_ISLNK(mode) : ftype == LISZT_T_LNK)
+            c = '@';
+        else if (stat_ok ? S_ISFIFO(mode) : ftype == LISZT_T_FIFO)
+            c = '|';
+        else if (stat_ok ? S_ISSOCK(mode) : ftype == LISZT_T_SOCK)
+            c = '=';
+        else
+            c = 0;
+    }
+    return c;
+}
+
+/* Inode and blocks prefixes shared by every format (-i, -s); returns
+   the byte count for start-column accounting. */
+static size_t
+emit_frills_count(const struct liszt_options *o, const struct lwidths *w,
+                  const struct litem *it)
 {
     char buf[64 + LISZT_LONGEST_HUMAN_READABLE];
     char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
     bool commas = o->format == LISZT_FMT_COMMAS;
     int iw = commas ? 0 : w->inode;
     int bw = commas ? 0 : w->blocks;
+    size_t total = 0;
 
     if (o->print_inode) {
         int n = it->stat_ok
@@ -219,6 +314,7 @@ emit_frills(const struct liszt_options *o, const struct lwidths *w,
                        (uintmax_t)it->st->ino)
             : snprintf(buf, sizeof buf, "%*s ", iw, "?");
         liszt_emit_bytes(buf, (size_t)n);
+        total += (size_t)n;
     }
     if (o->print_block_size) {
         const char *blocks = !it->stat_ok
@@ -228,12 +324,14 @@ emit_frills(const struct liszt_options *o, const struct lwidths *w,
                                    o->output_block_size);
         int n = snprintf(buf, sizeof buf, "%*s ", bw, blocks);
         liszt_emit_bytes(buf, (size_t)n);
+        total += (size_t)n;
     }
+    return total;
 }
 
 /* GNU format_user_or_group: a name gets gap+1 trailing spaces; numeric
-   ids render right-aligned with one trailing space. */
-static void
+   ids render right-aligned with one trailing space. Returns bytes. */
+static size_t
 emit_id_field(const char *name, uintmax_t id, int width)
 {
     char buf[64];
@@ -241,15 +339,21 @@ emit_id_field(const char *name, uintmax_t id, int width)
     if (name) {
         int gap = width - (int)strlen(name);
         int pad = gap > 0 ? gap : 0;
+        size_t total = strlen(name) + (size_t)pad + 1;
         liszt_emit_str(name);
         do
             liszt_emit_byte(' ');
         while (pad--);
-    } else {
-        int n = snprintf(buf, sizeof buf, "%*ju ", width, id);
-        liszt_emit_bytes(buf, (size_t)n);
+        return total;
     }
+    int n = snprintf(buf, sizeof buf, "%*ju ", width, id);
+    liszt_emit_bytes(buf, (size_t)n);
+    return (size_t)n;
 }
+
+static size_t emit_frills_count(const struct liszt_options *o,
+                                const struct lwidths *w,
+                                const struct litem *it);
 
 static void
 emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
@@ -259,8 +363,9 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     char buf[256 + LISZT_LONGEST_HUMAN_READABLE];
     char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
     const struct liszt_statinfo *st = it->st;
+    size_t prefix_len = 0;
 
-    emit_frills(o, w, it);
+    prefix_len += emit_frills_count(o, w, it);
 
     static const char type_letter[] = {
         '?', 'p', 'c', 'd', 'b', '-', 'l', 's', 'w'
@@ -287,19 +392,25 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     else
         n = snprintf(buf, sizeof buf, "%s %*s ", modebuf, w->nlink, "?");
     liszt_emit_bytes(buf, (size_t)n);
+    prefix_len += (size_t)n;
 
     if (o->print_owner)
-        emit_id_field(!it->stat_ok ? "?"
+        prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getuser(st->uid),
                       (uintmax_t)st->uid, w->owner);
     if (o->print_group)
-        emit_id_field(!it->stat_ok ? "?"
+        prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getgroup(st->gid),
                       (uintmax_t)st->gid, w->group);
     if (o->print_author)
-        emit_id_field(!it->stat_ok ? "?"
+        prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getuser(st->uid),
                       (uintmax_t)st->uid, w->author);
+    /* GNU resets its assembly buffer after flushing the id fields, so
+       the wrap-check start column counts only what follows (a p - buf
+       artifact print_name_with_quoting inherits; fuzz-pinned). */
+    if (o->print_owner || o->print_group || o->print_author)
+        prefix_len = 0;
 
     if (it->stat_ok && (S_ISCHR(st->mode) || S_ISBLK(st->mode))) {
         int blanks = w->size - (w->major + 2 + w->minor);
@@ -308,6 +419,7 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
                      (uintmax_t)major(st->rdev), w->minor,
                      (uintmax_t)minor(st->rdev));
         liszt_emit_bytes(buf, (size_t)n);
+        prefix_len += (size_t)n;
     } else {
         const char *size = !it->stat_ok
             ? "?"
@@ -316,6 +428,7 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
                                    o->file_output_block_size);
         n = snprintf(buf, sizeof buf, "%*s ", w->size, size);
         liszt_emit_bytes(buf, (size_t)n);
+        prefix_len += (size_t)n;
     }
 
     char tbuf[LISZT_TIME_BUFSZ];
@@ -323,6 +436,7 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     if (tlen > 0) {
         liszt_emit_bytes(tbuf, tlen);
         liszt_emit_byte(' ');
+        prefix_len += tlen + 1;
     } else {
         char sbuf[32];
         if (!it->stat_ok) {
@@ -335,24 +449,45 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
                          liszt_timefmt_expected_width(), sbuf);
         }
         liszt_emit_bytes(buf, (size_t)n);
+        prefix_len += (size_t)n;
     }
 
-    emit_name(it);
+    size_t nlen = emit_name_colored(it, false, prefix_len);
     if (it->ftype == LISZT_T_LNK && it->linkname) {
         liszt_emit_str(" -> ");
-        /* Targets always take the general-quoting path, but never the
-           align pad (both pinned by fuzz vs the oracle). */
-        size_t lt_len;
-        int lt_width;
-        bool lt_quoted;
-        const char *tq = liszt_quote_name(it->linkname,
-                                          &cur_opts->filename_qopts,
-                                          cur_opts->qmark_funny_chars,
-                                          false, &lt_len, &lt_width,
-                                          &lt_quoted);
-        liszt_emit_bytes(tq, lt_len);
+        emit_name_colored(it, true, prefix_len + nlen + 4);
+        if (cur_opts->indicator_style != LISZT_IND_NONE) {
+            char ic = type_indicator_char(true, it->linkmode,
+                                          LISZT_T_UNKNOWN,
+                                          cur_opts->indicator_style);
+            if (ic)
+                liszt_emit_byte(ic);
+        }
+    } else if (cur_opts->indicator_style != LISZT_IND_NONE) {
+        char ic = type_indicator_char(it->stat_ok, it->st->mode,
+                                      it->ftype,
+                                      cur_opts->indicator_style);
+        if (ic)
+            liszt_emit_byte(ic);
     }
     liszt_emit_byte('\n');
+}
+
+/* print_file_name_and_frills: normal color, frills, name, indicator. */
+static void
+emit_short_item(const struct liszt_options *o, const struct lwidths *w,
+                const struct litem *it, size_t start_col)
+{
+    if (o->print_with_color)
+        liszt_color_set_normal();
+    size_t fr = emit_frills_count(o, w, it);
+    emit_name_colored(it, false, start_col + fr);
+    if (o->indicator_style != LISZT_IND_NONE) {
+        char ic = type_indicator_char(it->stat_ok, it->st->mode,
+                                      it->ftype, o->indicator_style);
+        if (ic)
+            liszt_emit_byte(ic);
+    }
 }
 
 static void
@@ -360,10 +495,11 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
           const struct litem *it)
 {
     if (o->format == LISZT_FMT_LONG) {
+        if (o->print_with_color)
+            liszt_color_set_normal();
         emit_long_entry(o, w, it);
     } else {
-        emit_frills(o, w, it);
-        emit_name(it);
+        emit_short_item(o, w, it, 0);
         liszt_emit_byte('\n');
     }
 }
@@ -383,6 +519,8 @@ struct operand {
     unsigned char acl;
     unsigned char quoted;
     unsigned char padded;
+    unsigned char linkok;
+    unsigned char has_capability;
     bool is_dir;
 };
 
@@ -451,6 +589,8 @@ operand_to_litem(const struct operand *op, struct litem *it)
     it->ftype = op->ftype;
     it->stat_ok = op->stat_ok;
     it->acl = op->acl;
+    it->linkok = op->linkok;
+    it->has_capability = op->has_capability;
 }
 
 static enum liszt_ftype
@@ -538,12 +678,23 @@ classify_operand(const char *name, const struct liszt_options *o,
     /* GNU decorates every command-line operand during gobble - dirs
        included, since widths and any_has_acl accumulate before dirs are
        extracted from the batch. */
-    if (plan.needs_link_target && out->ftype == LISZT_T_LNK) {
+    if (out->ftype == LISZT_T_LNK
+        && (plan.needs_link_target || plan.check_symlink_mode)) {
         out->linkname = liszt_readlink_join("", name);
         if (!out->linkname)
             file_failure(false, "cannot read symbolic link %s",
                          name, errno);
+        if (out->linkname && plan.link_target_mode) {
+            struct liszt_statinfo ti;
+            if (liszt_stat_path(name, &ti) == 0) {
+                out->linkmode = ti.mode;
+                out->linkok = 1;
+            }
+        }
     }
+    if (plan.cap_probe && out->ftype == LISZT_T_REG)
+        out->has_capability =
+            liszt_xattr_list_has("", name, "security.capability");
     if (plan.needs_xattr)
         out->acl = probe_acl("", name, out->is_dir);
     return true;
@@ -566,16 +717,19 @@ on_dirread_fail(void *ctx, enum liszt_dirread_fail how, int errnum)
                  dc->name, errnum);
 }
 
-/* The plan's per-entry fetch pass: one statx with the derived mask,
-   plus readlink/xattr when the long format needs them, plus the
-   grouping resolutions carried over from sprint 02. */
+/* The plan's per-entry fetch pass, mirroring gobble_file's check_stat
+   terms: stat only what the format, sort, grouping, color scheme, or
+   indicator style can observe. */
 static void
 fill_meta(const char *dirname, const struct liszt_options *o,
           struct liszt_entries *es)
 {
     bool group = o->group_directories_first && o->sort != LISZT_SORT_NONE;
+    bool any = plan.needs_stat || group || plan.stat_dirs_for_color
+        || plan.stat_exec || plan.stat_links || plan.needs_link_target
+        || plan.needs_xattr || plan.cap_probe;
 
-    if (!plan.needs_stat && !group)
+    if (!any)
         return;
     liszt_entries_ensure_meta(es);
 
@@ -583,9 +737,18 @@ fill_meta(const char *dirname, const struct liszt_options *o,
         struct liszt_entry *e = &es->v[i];
         struct liszt_entrymeta *m = &es->meta[e->meta_idx];
         const char *nm = liszt_entry_name(es, e);
+        enum liszt_ftype t = e->ftype;
 
-        if (plan.needs_stat
-            || (group && e->ftype == LISZT_T_UNKNOWN)) {
+        bool check_stat = plan.needs_stat
+            || (group && t == LISZT_T_UNKNOWN)
+            || ((t == LISZT_T_DIR || t == LISZT_T_UNKNOWN)
+                && plan.stat_dirs_for_color)
+            || ((t == LISZT_T_LNK || t == LISZT_T_UNKNOWN)
+                && plan.stat_links)
+            || ((t == LISZT_T_REG || t == LISZT_T_UNKNOWN)
+                && plan.stat_exec);
+
+        if (check_stat) {
             if (liszt_statx_join(dirname, nm, plan.stat_wants, false,
                                  &m->st) == 0) {
                 m->stat_ok = 1;
@@ -597,7 +760,8 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 continue;
             }
         }
-        if (e->ftype == LISZT_T_LNK) {
+        if (e->ftype == LISZT_T_LNK
+            && (plan.needs_link_target || group)) {
             if (plan.needs_link_target) {
                 char *target = liszt_readlink_join(dirname, nm);
                 if (target) {
@@ -609,12 +773,20 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                                  liszt_join_path(dirname, nm), errno);
                 }
             }
-            if (group) {
+            if ((m->link_off != UINT32_MAX
+                 && (plan.link_target_mode || group))
+                || (group && m->link_off == UINT32_MAX)) {
                 struct liszt_statinfo ti;
-                if (liszt_stat_join(dirname, nm, &ti) == 0)
+                if (liszt_stat_join(dirname, nm, &ti) == 0) {
                     m->linkmode = ti.mode;
+                    m->linkok = 1;
+                }
             }
         }
+        if (plan.cap_probe
+            && (e->ftype == LISZT_T_REG || e->ftype == LISZT_T_UNKNOWN))
+            m->has_capability =
+                liszt_xattr_list_has(dirname, nm, "security.capability");
         if (plan.needs_xattr)
             m->acl = probe_acl(dirname, nm, e->ftype == LISZT_T_DIR);
     }
@@ -647,6 +819,8 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
     it->ftype = e->ftype;
     it->stat_ok = m ? m->stat_ok : 0;
     it->acl = m ? m->acl : 0;
+    it->linkok = m ? m->linkok : 0;
+    it->has_capability = m ? m->has_capability : 0;
 }
 
 /* The decoration pass: quoted display form, width, quoted flag - once
@@ -709,9 +883,7 @@ static void
 layout_emit_cb(size_t idx, size_t start_col, void *vctx)
 {
     struct batch_ctx *c = vctx;
-    (void)start_col;
-    emit_frills(c->o, c->w, &c->items[idx]);
-    emit_name(&c->items[idx]);
+    emit_short_item(c->o, c->w, &c->items[idx], start_col);
 }
 
 /* GNU length_of_file_name_and_frills: frills use column widths for
@@ -740,6 +912,10 @@ item_length(const struct liszt_options *o, const struct lwidths *w,
                        : 1)
                     : (size_t)w->blocks);
     len += (size_t)(it->width + it->padded);
+    if (o->indicator_style != LISZT_IND_NONE
+        && type_indicator_char(it->stat_ok, it->st->mode, it->ftype,
+                               o->indicator_style))
+        len += 1;
     return len;
 }
 
@@ -872,7 +1048,15 @@ main(int argc, char **argv)
     liszt_options_parse(argc, argv, &o);
     cur_opts = &o;
 
+    if (o.print_with_color) {
+        liszt_colors_parse(&o.print_with_color);
+        /* Color forces spaces-only padding (GNU main 1685). */
+        if (o.print_with_color)
+            o.tabsize = 0;
+    }
+
     liszt_plan_select(&o, &plan);
+    liszt_plan_color_update(&o, &plan);
     liszt_plan_debug_print(&plan);
     liszt_sort_init(&o, &plan);
 
@@ -977,6 +1161,10 @@ main(int argc, char **argv)
     }
     free(ops);
     free(o.operands);
+
+    if (o.print_with_color && liszt_color_used()
+        && !liszt_color_restore_is_noop())
+        liszt_color_restore_default();
 
     int werr;
     if (liszt_emit_finish(&werr) < 0) {

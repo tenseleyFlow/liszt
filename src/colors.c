@@ -1,6 +1,536 @@
 #include "colors.h"
 
-void
-liszt_colors_module_present(void)
+#include <fnmatch.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "emit.h"
+#include "util.h"
+
+#include "colors_terms.h"
+
+/* Builtin defaults, byte-for-byte GNU's color_indicator[] (ls.c 626). */
+static struct liszt_binstr color_indicator[] = {
+    { 2, "\033[" },     /* lc */
+    { 1, "m" },         /* rc */
+    { 0, NULL },        /* ec */
+    { 1, "0" },         /* rs */
+    { 0, NULL },        /* no */
+    { 0, NULL },        /* fi */
+    { 5, "01;34" },     /* di */
+    { 5, "01;36" },     /* ln */
+    { 2, "33" },        /* pi */
+    { 5, "01;35" },     /* so */
+    { 5, "01;33" },     /* bd */
+    { 5, "01;33" },     /* cd */
+    { 0, NULL },        /* mi */
+    { 0, NULL },        /* or */
+    { 5, "01;32" },     /* ex */
+    { 5, "01;35" },     /* do */
+    { 5, "37;41" },     /* su */
+    { 5, "30;43" },     /* sg */
+    { 5, "37;44" },     /* st */
+    { 5, "34;42" },     /* ow */
+    { 5, "30;42" },     /* tw */
+    { 0, NULL },        /* ca */
+    { 0, NULL },        /* mh */
+    { 3, "\033[K" },    /* cl */
+};
+
+static const char indicator_name[][2] = {
+    { 'l', 'c' }, { 'r', 'c' }, { 'e', 'c' }, { 'r', 's' }, { 'n', 'o' },
+    { 'f', 'i' }, { 'd', 'i' }, { 'l', 'n' }, { 'p', 'i' }, { 's', 'o' },
+    { 'b', 'd' }, { 'c', 'd' }, { 'm', 'i' }, { 'o', 'r' }, { 'e', 'x' },
+    { 'd', 'o' }, { 's', 'u' }, { 's', 'g' }, { 's', 't' }, { 'o', 'w' },
+    { 't', 'w' }, { 'c', 'a' }, { 'm', 'h' }, { 'c', 'l' },
+};
+enum { N_INDICATORS = sizeof indicator_name / sizeof indicator_name[0] };
+
+struct color_ext_type {
+    struct liszt_binstr ext;
+    struct liszt_binstr seq;
+    bool exact_match;
+    struct color_ext_type *next;
+};
+
+static struct color_ext_type *color_ext_list;
+static char *color_buf;
+static bool color_symlink_referent;
+static bool used_color;
+
+bool
+liszt_color_is_colored(enum liszt_cind ind)
 {
+    size_t len = color_indicator[ind].len;
+    const char *s = color_indicator[ind].string;
+
+    return !(len == 0
+             || (len == 1 && s[0] == '0')
+             || (len == 2 && s[0] == '0' && s[1] == '0'));
+}
+
+bool
+liszt_color_symlink_as_referent(void)
+{
+    return color_symlink_referent;
+}
+
+static bool
+known_term_type(void)
+{
+    const char *term = getenv("TERM");
+
+    if (!term || !*term)
+        return false;
+    for (size_t i = 0; i < sizeof known_terms / sizeof known_terms[0]; i++)
+        if (fnmatch(known_terms[i], term, 0) == 0)
+            return true;
+    return false;
+}
+
+/* get_funky_string port (ls.c 2470): decode one LS_COLORS value into
+   *DEST, stopping at ':' or NUL (or '=' when EQUALS_END). */
+static bool
+get_funky_string(char **dest, const char **src, bool equals_end,
+                 size_t *output_count)
+{
+    char num = 0;
+    size_t count = 0;
+    enum {
+        ST_GND, ST_BACKSLASH, ST_OCTAL, ST_HEX, ST_CARET, ST_END, ST_ERROR
+    } state = ST_GND;
+    const char *p = *src;
+    char *q = *dest;
+
+    while (state < ST_END) {
+        switch (state) {
+        case ST_GND:
+            switch (*p) {
+            case ':':
+            case '\0':
+                state = ST_END;
+                break;
+            case '\\':
+                state = ST_BACKSLASH;
+                ++p;
+                break;
+            case '^':
+                state = ST_CARET;
+                ++p;
+                break;
+            case '=':
+                if (equals_end) {
+                    state = ST_END;
+                    break;
+                }
+                /* fall through */
+            default:
+                *(q++) = *(p++);
+                ++count;
+                break;
+            }
+            break;
+
+        case ST_BACKSLASH:
+            switch (*p) {
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7':
+                state = ST_OCTAL;
+                num = (char)(*p - '0');
+                break;
+            case 'x': case 'X':
+                state = ST_HEX;
+                num = 0;
+                break;
+            case 'a': num = '\a'; break;
+            case 'b': num = '\b'; break;
+            case 'e': num = 27; break;
+            case 'f': num = '\f'; break;
+            case 'n': num = '\n'; break;
+            case 'r': num = '\r'; break;
+            case 't': num = '\t'; break;
+            case 'v': num = '\v'; break;
+            case '?': num = 127; break;
+            case '_': num = ' '; break;
+            case '\0':
+                state = ST_ERROR;
+                break;
+            default:
+                num = *p;
+                break;
+            }
+            if (state == ST_BACKSLASH) {
+                *(q++) = num;
+                ++count;
+                state = ST_GND;
+            }
+            ++p;
+            break;
+
+        case ST_OCTAL:
+            if (*p < '0' || *p > '7') {
+                *(q++) = num;
+                ++count;
+                state = ST_GND;
+            } else {
+                num = (char)((num << 3) + (*(p++) - '0'));
+            }
+            break;
+
+        case ST_HEX:
+            switch (*p) {
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9':
+                num = (char)((num << 4) + (*(p++) - '0'));
+                break;
+            case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
+                num = (char)((num << 4) + (*(p++) - 'a') + 10);
+                break;
+            case 'A': case 'B': case 'C': case 'D': case 'E': case 'F':
+                num = (char)((num << 4) + (*(p++) - 'A') + 10);
+                break;
+            default:
+                *(q++) = num;
+                ++count;
+                state = ST_GND;
+                break;
+            }
+            break;
+
+        case ST_CARET:
+            state = ST_GND;
+            if (*p >= '@' && *p <= '~') {
+                *(q++) = (char)(*(p++) & 037);
+                ++count;
+            } else if (*p == '?') {
+                *(q++) = 127;
+                ++count;
+            } else {
+                state = ST_ERROR;
+            }
+            break;
+
+        case ST_END: case ST_ERROR: default:
+            break;
+        }
+    }
+
+    *dest = q;
+    *src = p;
+    *output_count = count;
+    return state != ST_ERROR;
+}
+
+void
+liszt_colors_parse(bool *color_enabled)
+{
+    const char *p;
+    char *buf;
+    char label0 = 0, label1 = 0;
+    struct color_ext_type *ext = NULL;
+
+    if ((p = getenv("LS_COLORS")) == NULL || *p == '\0') {
+        const char *colorterm = getenv("COLORTERM");
+        if (!(colorterm && *colorterm) && !known_term_type())
+            *color_enabled = false;
+        return;
+    }
+
+    buf = color_buf = liszt_xstrdup(p);
+
+    enum { PS_START = 1, PS_2, PS_3, PS_4, PS_FAIL, PS_DONE } state =
+        PS_START;
+    while (true) {
+        switch (state) {
+        case PS_START:
+            switch (*p) {
+            case ':':
+                ++p;
+                break;
+            case '*':
+                ext = liszt_xmalloc(sizeof *ext);
+                ext->next = color_ext_list;
+                color_ext_list = ext;
+                ext->exact_match = false;
+                ++p;
+                ext->ext.string = buf;
+                state = get_funky_string(&buf, &p, true, &ext->ext.len)
+                    ? PS_4 : PS_FAIL;
+                break;
+            case '\0':
+                state = PS_DONE;
+                goto done;
+            default:
+                label0 = *p++;
+                state = PS_2;
+                break;
+            }
+            break;
+
+        case PS_2:
+            if (*p) {
+                label1 = *p++;
+                state = PS_3;
+            } else {
+                state = PS_FAIL;
+            }
+            break;
+
+        case PS_3:
+            state = PS_FAIL;
+            if (*(p++) == '=') {
+                for (int i = 0; i < N_INDICATORS; i++) {
+                    if (label0 == indicator_name[i][0]
+                        && label1 == indicator_name[i][1]) {
+                        color_indicator[i].string = buf;
+                        state = get_funky_string(&buf, &p, false,
+                                                 &color_indicator[i].len)
+                            ? PS_START : PS_FAIL;
+                        break;
+                    }
+                }
+                if (state == PS_FAIL) {
+                    char lbl[3] = { label0, label1, '\0' };
+                    liszt_error(0, "unrecognized prefix: %s%s%s",
+                                liszt_qL(), liszt_quote_diag(lbl),
+                                liszt_qR());
+                }
+            }
+            break;
+
+        case PS_4:
+            if (*(p++) == '=') {
+                ext->seq.string = buf;
+                state = get_funky_string(&buf, &p, false, &ext->seq.len)
+                    ? PS_START : PS_FAIL;
+            } else {
+                state = PS_FAIL;
+            }
+            break;
+
+        case PS_FAIL:
+            goto done;
+
+        case PS_DONE: default:
+            goto done;
+        }
+    }
+done:
+
+    if (state == PS_FAIL) {
+        liszt_error(0,
+                    "unparsable value for LS_COLORS environment variable");
+        free(color_buf);
+        for (struct color_ext_type *e = color_ext_list; e != NULL;) {
+            struct color_ext_type *e2 = e;
+            e = e->next;
+            free(e2);
+        }
+        color_ext_list = NULL;
+        *color_enabled = false;
+        return;
+    }
+
+    /* Postprocess: exact_match for case-distinct duplicates, SIZE_MAX
+       len for entries shadowed by precedence (ls.c 2836). */
+    for (struct color_ext_type *e1 = color_ext_list; e1 != NULL;
+         e1 = e1->next) {
+        bool case_ignored = false;
+
+        for (struct color_ext_type *e2 = e1->next; e2 != NULL;
+             e2 = e2->next) {
+            if (e2->ext.len < (size_t)-1 && e1->ext.len == e2->ext.len) {
+                if (memcmp(e1->ext.string, e2->ext.string, e1->ext.len)
+                    == 0) {
+                    e2->ext.len = (size_t)-1;
+                } else if (liszt_strncasecmp_c(e1->ext.string,
+                                               e2->ext.string,
+                                               e1->ext.len) == 0) {
+                    if (case_ignored) {
+                        e2->ext.len = (size_t)-1;
+                    } else if (e1->seq.len == e2->seq.len
+                               && memcmp(e1->seq.string, e2->seq.string,
+                                         e1->seq.len) == 0) {
+                        e2->ext.len = (size_t)-1;
+                        case_ignored = true;
+                    } else {
+                        e1->exact_match = true;
+                        e2->exact_match = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (color_indicator[LISZT_C_LINK].len == 6
+        && strncmp(color_indicator[LISZT_C_LINK].string, "target", 6) == 0)
+        color_symlink_referent = true;
+}
+
+const struct liszt_binstr *
+liszt_color_for(const struct liszt_colorable *c)
+{
+    enum liszt_cind type;
+    struct color_ext_type *ext = NULL;
+
+    if (c->linkok == -1 && liszt_color_is_colored(LISZT_C_MISSING)) {
+        type = LISZT_C_MISSING;
+    } else if (!c->stat_ok) {
+        /* GNU filetype_indicator, indexed by our compact ftype enum:
+           unknown fifo chr dir blk reg lnk sock wht. */
+        static const enum liszt_cind filetype_indicator[] = {
+            LISZT_C_ORPHAN, LISZT_C_FIFO, LISZT_C_CHR, LISZT_C_DIR,
+            LISZT_C_BLK, LISZT_C_FILE, LISZT_C_LINK, LISZT_C_SOCK,
+            LISZT_C_FILE
+        };
+        type = filetype_indicator[c->ftype];
+    } else {
+        mode_t mode = c->mode;
+        if (S_ISREG(mode)) {
+            type = LISZT_C_FILE;
+            if ((mode & S_ISUID) != 0
+                && liszt_color_is_colored(LISZT_C_SETUID))
+                type = LISZT_C_SETUID;
+            else if ((mode & S_ISGID) != 0
+                     && liszt_color_is_colored(LISZT_C_SETGID))
+                type = LISZT_C_SETGID;
+            else if (c->has_capability)
+                type = LISZT_C_CAP;
+            else if ((mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0
+                     && liszt_color_is_colored(LISZT_C_EXEC))
+                type = LISZT_C_EXEC;
+            else if (c->multi_hardlink
+                     && liszt_color_is_colored(LISZT_C_MULTIHARDLINK))
+                type = LISZT_C_MULTIHARDLINK;
+        } else if (S_ISDIR(mode)) {
+            type = LISZT_C_DIR;
+            if ((mode & S_ISVTX) && (mode & S_IWOTH)
+                && liszt_color_is_colored(LISZT_C_STICKY_OTHER_WRITABLE))
+                type = LISZT_C_STICKY_OTHER_WRITABLE;
+            else if ((mode & S_IWOTH) != 0
+                     && liszt_color_is_colored(LISZT_C_OTHER_WRITABLE))
+                type = LISZT_C_OTHER_WRITABLE;
+            else if ((mode & S_ISVTX) != 0
+                     && liszt_color_is_colored(LISZT_C_STICKY))
+                type = LISZT_C_STICKY;
+        } else if (S_ISLNK(mode)) {
+            type = LISZT_C_LINK;
+        } else if (S_ISFIFO(mode)) {
+            type = LISZT_C_FIFO;
+        } else if (S_ISSOCK(mode)) {
+            type = LISZT_C_SOCK;
+        } else if (S_ISBLK(mode)) {
+            type = LISZT_C_BLK;
+        } else if (S_ISCHR(mode)) {
+            type = LISZT_C_CHR;
+        } else {
+            type = LISZT_C_ORPHAN;
+        }
+    }
+
+    if (type == LISZT_C_FILE) {
+        size_t len = strlen(c->name);
+        const char *name = c->name + len;
+        for (ext = color_ext_list; ext != NULL; ext = ext->next) {
+            if (ext->ext.len <= len) {
+                if (ext->exact_match) {
+                    if (memcmp(name - ext->ext.len, ext->ext.string,
+                               ext->ext.len) == 0)
+                        break;
+                } else {
+                    if (liszt_strncasecmp_c(name - ext->ext.len,
+                                            ext->ext.string,
+                                            ext->ext.len) == 0)
+                        break;
+                }
+            }
+        }
+    }
+
+    if (type == LISZT_C_LINK && !c->linkok) {
+        if (color_symlink_referent
+            || liszt_color_is_colored(LISZT_C_ORPHAN))
+            type = LISZT_C_ORPHAN;
+    }
+
+    const struct liszt_binstr *s =
+        ext ? &ext->seq : &color_indicator[type];
+    return s->string ? s : NULL;
+}
+
+/* --- emission ---------------------------------------------------------- */
+
+void
+liszt_color_put(const struct liszt_binstr *s)
+{
+    if (!used_color) {
+        /* GNU put_indicator first-use: mark, then emit the reset
+           prologue (signal-handler install is tty-only and deferred -
+           the piped goldens cannot observe it). */
+        used_color = true;
+        liszt_color_prep_non_filename();
+    }
+    liszt_emit_bytes(s->string, s->len);
+}
+
+void
+liszt_color_put_ind(enum liszt_cind ind)
+{
+    liszt_color_put(&color_indicator[ind]);
+}
+
+void
+liszt_color_restore_default(void)
+{
+    liszt_color_put_ind(LISZT_C_LEFT);
+    liszt_color_put_ind(LISZT_C_RIGHT);
+}
+
+void
+liszt_color_set_normal(void)
+{
+    if (liszt_color_is_colored(LISZT_C_NORM)) {
+        liszt_color_put_ind(LISZT_C_LEFT);
+        liszt_color_put_ind(LISZT_C_NORM);
+        liszt_color_put_ind(LISZT_C_RIGHT);
+    }
+}
+
+void
+liszt_color_start(const struct liszt_binstr *seq)
+{
+    if (liszt_color_is_colored(LISZT_C_NORM))
+        liszt_color_restore_default();
+    liszt_color_put_ind(LISZT_C_LEFT);
+    liszt_color_put(seq);
+    liszt_color_put_ind(LISZT_C_RIGHT);
+}
+
+void
+liszt_color_prep_non_filename(void)
+{
+    if (color_indicator[LISZT_C_END].string != NULL) {
+        liszt_color_put_ind(LISZT_C_END);
+    } else {
+        liszt_color_put_ind(LISZT_C_LEFT);
+        liszt_color_put_ind(LISZT_C_RESET);
+        liszt_color_put_ind(LISZT_C_RIGHT);
+    }
+}
+
+bool
+liszt_color_used(void)
+{
+    return used_color;
+}
+
+/* Whether the main-exit restore is a no-op (lc/rc at their defaults). */
+bool
+liszt_color_restore_is_noop(void)
+{
+    return color_indicator[LISZT_C_LEFT].len == 2
+        && memcmp(color_indicator[LISZT_C_LEFT].string, "\033[", 2) == 0
+        && color_indicator[LISZT_C_RIGHT].len == 1
+        && color_indicator[LISZT_C_RIGHT].string[0] == 'm';
 }
