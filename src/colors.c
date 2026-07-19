@@ -548,10 +548,10 @@ liszt_color_for(const struct liszt_colorable *c)
    and LISZT_COLORS overlay non-NULL entries. Values point either at
    static literals or into the overlay arena. */
 static struct liszt_binstr theme_styles[LISZT_TK_N] = {
-    /* fi */ { 0, NULL },       /* di */ { 0, NULL },
-    /* ln */ { 0, NULL },       /* pi */ { 0, NULL },
-    /* bd */ { 0, NULL },       /* cd */ { 0, NULL },
-    /* so */ { 0, NULL },       /* ex */ { 0, NULL },
+    /* fi */ { 0, NULL },       /* di */ { 4, "1;34" },
+    /* ln */ { 2, "36" },       /* pi */ { 2, "33" },
+    /* bd */ { 4, "1;33" },     /* cd */ { 4, "1;33" },
+    /* so */ { 4, "1;31" },     /* ex */ { 4, "1;32" },
     /* or */ { 0, NULL },
     /* ur */ { 4, "1;33" },     /* uw */ { 4, "1;31" },
     /* ux */ { 6, "1;4;32" },   /* ue */ { 4, "1;32" },
