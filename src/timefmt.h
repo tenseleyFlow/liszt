@@ -29,4 +29,7 @@ size_t liszt_timefmt_render(char *buf, struct timespec when);
    long_time_expected_width), for the raw-seconds fallback padding. */
 int liszt_timefmt_expected_width(void);
 
+/* LISZT_DEBUG_STATS hook: memo hit/miss counters to stderr. */
+void liszt_timefmt_stats(void);
+
 #endif

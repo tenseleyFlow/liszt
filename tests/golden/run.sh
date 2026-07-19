@@ -55,6 +55,24 @@ for loc in en_US.UTF-8 en_US.utf8; do
         break
     fi
 done
+# LC_TIME depth legs (07D): a Latin locale with a non-dot decimal point
+# and a CJK locale with variable-width, digit-leading month names (the
+# abformat right-align path). Absent locales skip their cases; CI
+# generates both on ubuntu, macOS/FreeBSD ship them, musl has neither.
+de_locale=""
+for loc in de_DE.UTF-8 de_DE.utf8; do
+    if locale -a 2>/dev/null | grep -qix "$loc"; then
+        de_locale="$loc"
+        break
+    fi
+done
+ja_locale=""
+for loc in ja_JP.UTF-8 ja_JP.utf8; do
+    if locale -a 2>/dev/null | grep -qix "$loc"; then
+        ja_locale="$loc"
+        break
+    fi
+done
 
 if [ -z "$utf8_locale" ] && [ "${LISZT_ALLOW_NO_UTF8:-0}" != "1" ]; then
     echo "tests/golden: no UTF-8 locale available; refusing (set LISZT_ALLOW_NO_UTF8=1 to override)" >&2
@@ -87,8 +105,11 @@ run_pinned() {
     shift
     # EXTRA_ENV: optional space-free NAME=VALUE pairs (word-split on
     # purpose) for cases pinning env-driven behavior (TIME_STYLE).
-    env -i $EXTRA_ENV PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
-        LS_COLORS= LISZT_DEBUG_VERIFY=1 "$@"
+    # LANGUAGE=C pins gettext away: an oracle with installed message
+    # catalogs (brew gls) would otherwise translate LC_TIME format
+    # strings and diagnostics that liszt never translates.
+    env -i $EXTRA_ENV PATH="$PATH" LANGUAGE=C LC_ALL="$lc" TZ=UTC0 \
+        COLUMNS=80 LS_COLORS= LISZT_DEBUG_VERIFY=1 "$@"
 }
 EXTRA_ENV=
 
@@ -672,6 +693,56 @@ EXTRA_ENV=TIME_STYLE=bogus
 run_case_pin911 7 "TIME_STYLE env invalid" C 2 -- -l "$fix/times"
 run_case 7 "TIME_STYLE bogus without -l" C 0 -- -1 "$fix/times"
 EXTRA_ENV=
+
+# 07D: LC_TIME depth. German pins the non-dot decimal point (-h sizes
+# localize through localeconv - the one place LC_NUMERIC-adjacent data
+# shows in ls output); Japanese pins variable-width digit-leading month
+# abbreviations through the abformat right-align path and CJK column
+# alignment. LANGUAGE=C in run_pinned keeps catalog translations out.
+mkdir -p "$work/hsizes"
+for sz in 1536 10485 1200000; do
+    dd if=/dev/zero of="$work/hsizes/h$sz" bs=1 count=0 seek="$sz" 2>/dev/null
+    touch -d "2020-01-15T12:00:00Z" "$work/hsizes/h$sz"
+done
+if [ -n "$de_locale" ]; then
+    run_case 7 "de locale style" "$de_locale" 0 -- -l "$fix/times"
+    run_case 7 "de style word locale" "$de_locale" 0 -- -l --time-style=locale "$fix/times"
+    run_case 7 "de full-iso" "$de_locale" 0 -- -l --time-style=full-iso "$fix/times"
+    run_case 7 "de decimal comma -lh" "$de_locale" 0 -- -lh "$work/hsizes"
+    run_case 7 "de decimal comma -sh" "$de_locale" 0 -- -1sh "$work/hsizes"
+    run_case 7 "de sorted" "$de_locale" 0 -- -1a "$fix/shapes"
+    # LC_TIME alone drives rendering while collation stays C: empty
+    # LC_ALL falls through to the category variables.
+    EXTRA_ENV=LC_TIME=$de_locale
+    run_case 7 "LC_TIME category split" "" 0 -- -l "$fix/times"
+    EXTRA_ENV=
+fi
+if [ -n "$ja_locale" ]; then
+    run_case 7 "ja locale style" "$ja_locale" 0 -- -l "$fix/times"
+    run_case 7 "ja abformat recent+older" "$ja_locale" 0 -- -lt "$fix/times"
+    run_case 7 "ja atime display" "$ja_locale" 0 -- -lu "$work/atimes"
+    run_case 7 "ja iso style" "$ja_locale" 0 -- -l --time-style=iso "$fix/times"
+    run_case 7 "ja sorted columns" "$ja_locale" 0 -- -C "$fix/shapes"
+fi
+
+# 07D: collation edges (rank's memcoll cases): case pairs, punctuation
+# vs space, number runs, precomposed vs combining accents. Parity holds
+# whatever the platform tables say - both sides ask the same strcoll.
+mkdir -p "$work/coll"
+for n in "a b" "a-b" "ab" "A1" "a1" "a01" "a001x" "z" "Z" "9" "10"; do
+    printf 'x\n' > "$work/coll/$n"
+done
+printf 'x\n' > "$work/coll/$(printf '\303\251clair')"      # precomposed e-acute
+printf 'x\n' > "$work/coll/$(printf 'e\314\201clair')"     # combining accent
+printf 'x\n' > "$work/coll/$(printf '\303\204pfel')"       # A-umlaut
+printf 'x\n' > "$work/coll/apfel"
+run_case 7 "collation edges dict" "$D8" 0 -- -1 "$work/coll"
+run_case 7 "collation edges dict -r" "$D8" 0 -- -1r "$work/coll"
+run_case 7 "collation edges C" C 0 -- -1 "$work/coll"
+run_case 7 "collation edges -X dict" "$D8" 0 -- -1X "$work/coll"
+if [ -n "$de_locale" ]; then
+    run_case 7 "collation edges de" "$de_locale" 0 -- -1 "$work/coll"
+fi
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus

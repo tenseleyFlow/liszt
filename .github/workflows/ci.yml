@@ -19,12 +19,21 @@ jobs:
       - name: install GNU coreutils oracle (macOS)
         if: runner.os == 'macOS'
         run: brew install coreutils
+      - name: generate LC_TIME matrix locales (Linux)
+        if: runner.os == 'Linux'
+        run: sudo locale-gen de_DE.UTF-8 ja_JP.UTF-8
+      # Linux builds the exact pinned oracle from source (cached); macOS
+      # uses brew's gls as a loose oracle - coreutils 9.11 does not build
+      # cleanly against current macOS SDKs, so pin-sensitive cases skip
+      # there (nomad-1 carries the pinned run at release time).
       - name: cache pinned oracle
+        if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: build/gnu-ls
           key: gnu-ls-9.11-${{ runner.os }}-v1
       - name: build pinned oracle (coreutils 9.11)
+        if: runner.os == 'Linux'
         run: sh scripts/build-gnu-ls.sh
       - run: ./configure
       - run: make

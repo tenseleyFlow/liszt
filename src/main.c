@@ -1312,5 +1312,7 @@ main(int argc, char **argv)
         liszt_error(werr, "write error");
         return LISZT_STATUS_SERIOUS;
     }
+    if (getenv("LISZT_DEBUG_STATS") != NULL)
+        liszt_timefmt_stats();
     return liszt_exit_status();
 }

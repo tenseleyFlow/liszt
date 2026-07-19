@@ -37,6 +37,8 @@ struct memo_ent {
 
 #define MEMO_SLOTS 1024
 static struct memo_ent memo[MEMO_SLOTS];
+static size_t memo_hits;
+static size_t memo_misses;
 
 static const char *
 first_percent_b(const char *fmt)
@@ -303,12 +305,14 @@ liszt_timefmt_render(char *buf, struct timespec when)
     for (size_t probe = 0; probe < MEMO_SLOTS; probe++) {
         struct memo_ent *m = &memo[(slot + probe) % MEMO_SLOTS];
         if (m->key == key) {
+            memo_hits++;
             memcpy(buf, m->text, m->len);
             buf[m->len] = '\0';
             return m->len;
         }
         if (m->key == 0) {
             struct tm tm;
+            memo_misses++;
             if (!localtime_r(&when.tv_sec, &tm))
                 return (size_t)-1;
             size_t n = render_at(buf, recent, &tm, when.tv_nsec);
@@ -325,6 +329,13 @@ liszt_timefmt_render(char *buf, struct timespec when)
     if (!localtime_r(&when.tv_sec, &tm))
         return (size_t)-1;
     return render_at(buf, recent, &tm, when.tv_nsec);
+}
+
+void
+liszt_timefmt_stats(void)
+{
+    fprintf(stderr, "timefmt: memo hits=%zu misses=%zu gran=%d\n",
+            memo_hits, memo_misses, (int)gran);
 }
 
 int
