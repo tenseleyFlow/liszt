@@ -20,6 +20,7 @@ struct liszt_statinfo {
     struct timespec mtime;
     blkcnt_t blocks;    /* 512-byte units (ST_NBLOCKSIZE) */
     ino_t ino;
+    dev_t dev;
     dev_t rdev;
 };
 
@@ -49,6 +50,10 @@ int liszt_stat_join(const char *dir, const char *name,
                     struct liszt_statinfo *out);
 int liszt_stat_path(const char *path, struct liszt_statinfo *out);
 int liszt_lstat_path(const char *path, struct liszt_statinfo *out);
+
+/* fstat an open descriptor (loop detection on dirfds: O(1) instead of
+   re-walking a deep path). */
+int liszt_fstat(int fd, struct liszt_statinfo *out);
 
 /* "DIR/NAME" in a reused internal buffer, valid until the next join or
    stat call through this module. */

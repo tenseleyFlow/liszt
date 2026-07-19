@@ -131,6 +131,8 @@ struct staging {
     bool reverse;
     bool group_directories_first;
     bool immediate_dirs;
+    bool recursive;
+    int deref_opt;      /* -1 unset, else enum liszt_deref */
     bool explicit_time; /* -c/-u seen; feeds the sort-resolution rule */
     bool print_owner;
     bool print_group;
@@ -399,6 +401,21 @@ handle(int key, const char *value, const char *display, struct staging *st)
     case 'p':
         st->indicator_style = LISZT_IND_SLASH;
         break;
+    case 'R':
+        st->recursive = true;
+        break;
+    case 'd':
+        st->immediate_dirs = true;
+        break;
+    case 'H':
+        st->deref_opt = LISZT_DEREF_COMMAND_LINE_ARGUMENTS;
+        break;
+    case 'L':
+        st->deref_opt = LISZT_DEREF_ALWAYS;
+        break;
+    case KEY_DEREF_CL_SYMLINK_TO_DIR:
+        st->deref_opt = LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
+        break;
     case KEY_FILE_TYPE:
         st->indicator_style = LISZT_IND_FILE_TYPE;
         break;
@@ -618,6 +635,8 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .reverse = false,
         .group_directories_first = false,
         .immediate_dirs = false,
+        .recursive = false,
+        .deref_opt = -1,
         .explicit_time = false,
         .print_owner = true,
         .print_group = true,
@@ -672,6 +691,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     o->reverse = st.reverse;
     o->group_directories_first = st.group_directories_first;
     o->immediate_dirs = st.immediate_dirs;
+    o->recursive = st.recursive;
     o->print_owner = st.print_owner;
     o->print_group = st.print_group;
     o->print_author = st.print_author;
@@ -714,11 +734,14 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         o->sort = LISZT_SORT_TIME;
     else
         o->sort = LISZT_SORT_NAME;
-    o->deref = (o->immediate_dirs
-                || o->indicator_style == LISZT_IND_CLASSIFY
-                || o->format == LISZT_FMT_LONG)
-        ? LISZT_DEREF_NEVER
-        : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
+    if (st.deref_opt >= 0)
+        o->deref = (enum liszt_deref)st.deref_opt;
+    else
+        o->deref = (o->immediate_dirs
+                    || o->indicator_style == LISZT_IND_CLASSIFY
+                    || o->format == LISZT_FMT_LONG)
+            ? LISZT_DEREF_NEVER
+            : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
 
     /* Line length (GNU 2272-2303): -w wins; else tty winsize; else
        COLUMNS (invalid warns and falls through); else 80. -w0 and huge

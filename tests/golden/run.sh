@@ -541,6 +541,62 @@ run_case 5 "-F operands" C 0 -- -F -1 "$fix/links/good" "$fix/meta/exec"
 run_case 5 "-p versions" C 0 -- -1p "$fix/versions"
 run_case 5 "color auto piped" C 0 -- --color=auto -1a "$fix/links"
 
+# 06: recursion and the deref family. Deep and wide trees built here;
+# unreadable-subdir continuation and symlink cycles ride the core
+# fixture.
+mkdir -p "$work/deep"
+dp="$work/deep"
+i=0
+while [ "$i" -lt 40 ]; do
+    dp="$dp/d$i"
+    mkdir "$dp"
+    printf 'x\n' > "$dp/f$i"
+    i=$((i + 1))
+done
+mkdir -p "$work/wide"
+i=0
+while [ "$i" -lt 50 ]; do
+    mkdir "$work/wide/w$i"
+    printf 'x\n' > "$work/wide/w$i/inner"
+    i=$((i + 1))
+done
+
+run_case 6 "-R core tree" C 1 -- -R1 "$fix"
+run_case 6 "-R core -a" C 1 -- -R1a "$fix"
+run_case 6 "-R core utf8" "$U8" 1 -- -R1 "$fix"
+run_case 6 "-R core dict" "$D8" 1 -- -R1 "$fix"
+run_case 6 "-R -l links" C 0 -- -Rl "$fix/links"
+run_case 6 "-R -U" C 0 -- -RU1 "$fix/links"
+run_case 6 "-R -t" C 1 -- -Rt1 "$fix"
+run_case 6 "-R reverse" C 0 -- -R1r "$fix/links"
+run_case 6 "-R columns" C 1 -- -RC -w 80 "$fix"
+run_case 6 "-R multi operands" C 0 -- -R1 "$fix/links" "$fix/times"
+run_case 6 "-R file+dir operands" C 0 -- -R1 "$fix/times/old-a" "$fix/times"
+run_case 6 "-R deep tree" C 0 -- -R1 "$work/deep"
+run_case 6 "-R deep -l" C 0 -- -Rl "$work/deep"
+run_case 6 "-R wide tree" C 0 -- -R1 "$work/wide"
+run_case 6 "-R unreadable continues" C 1 -- -R1 "$fix/perm"
+run_case 6 "-RL cycle detect" C 2 -- -RL1 "$fix/links"
+run_case 6 "-RL cycle -l" C 2 -- -RLl "$fix/links"
+run_case 6 "-RL full tree" C 2 -- -RL1 "$fix"
+run_case 6 "-d dir operand" C 0 -- -d1 "$fix/plain"
+run_case 6 "-d multiple" C 0 -- -d1 "$fix/plain" "$fix/links" "$fix/times/old-a"
+run_case 6 "-dl long" C 0 -- -dl "$fix/plain"
+run_case 6 "-d symlink-to-dir" C 0 -- -d1 "$fix/links/gooddir"
+run_case 6 "-dR no recursion" C 0 -- -dR1 "$fix/plain"
+run_case 6 "-dF classify" C 0 -- -dF "$fix/plain" "$fix/links/gooddir"
+run_case 6 "-H symlink-to-dir op" C 0 -- -H1 "$fix/links/gooddir"
+run_case 6 "-H dangling op" C 2 -- -H1 "$fix/links/dangling"
+run_case 6 "-Hl operands" C 0 -- -Hl "$fix/links/good" "$fix/links/gooddir"
+run_case 6 "-L links -a" C 0 -- -L1a "$fix/links"
+run_case 6 "-lL dangling errors" C 1 -- -lLa "$fix/links"
+run_case 6 "-L dangling operand" C 2 -- -L1 "$fix/links/dangling"
+run_case 6 "-L target-time sort" C 1 -- -Lt1 "$fix/links"
+run_case 6 "-L classify" C 1 -- -LF1a "$fix/links"
+run_case 6 "explicit cl-symlink-to-dir" C 0 -- -1 --dereference-command-line-symlink-to-dir "$fix/links/gooddir"
+run_case_color "$DEFCOLORS" 6 "-R color" C 0 -- -R1 --color=always "$fix/links"
+run_case_color "$DEFCOLORS" 6 "-L color links" C 1 -- -L1a --color=always "$fix/links"
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

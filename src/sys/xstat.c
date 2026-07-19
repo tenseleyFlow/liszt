@@ -93,6 +93,7 @@ liszt_statx_path(const char *path, unsigned wants, bool follow,
     out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
     out->blocks = (blkcnt_t)stx.stx_blocks;
     out->ino = stx.stx_ino;
+    out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);
     out->rdev = makedev(stx.stx_rdev_major, stx.stx_rdev_minor);
     return 0;
 }
@@ -110,6 +111,7 @@ fill(const struct stat *st, struct liszt_statinfo *out)
     out->mtime = ST_MTIMESPEC(st);
     out->blocks = st->st_blocks;
     out->ino = st->st_ino;
+    out->dev = st->st_dev;
     out->rdev = st->st_rdev;
 }
 
@@ -214,4 +216,32 @@ liszt_xattr_list_has(const char *dir, const char *name, const char *attr)
         if (strcmp(buf + off, attr) == 0)
             return true;
     return false;
+}
+
+int
+liszt_fstat(int fd, struct liszt_statinfo *out)
+{
+#if LISZT_HAVE_STATX
+    struct statx stx;
+    if (statx(fd, "", AT_EMPTY_PATH, STATX_INO, &stx) < 0)
+        return -1;
+    out->mode = stx.stx_mode;
+    out->nlink = stx.stx_nlink;
+    out->uid = stx.stx_uid;
+    out->gid = stx.stx_gid;
+    out->size = (off_t)stx.stx_size;
+    out->mtime.tv_sec = stx.stx_mtime.tv_sec;
+    out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
+    out->blocks = (blkcnt_t)stx.stx_blocks;
+    out->ino = stx.stx_ino;
+    out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);
+    out->rdev = makedev(stx.stx_rdev_major, stx.stx_rdev_minor);
+    return 0;
+#else
+    struct stat st;
+    if (fstat(fd, &st) < 0)
+        return -1;
+    fill(&st, out);
+    return 0;
+#endif
 }

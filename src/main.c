@@ -34,28 +34,38 @@ static struct liszt_plan plan;
 static const struct liszt_options *cur_opts;
 static bool cur_some_quoted;
 
-/* GNU quoteaf: shell-escape-always rendering for diagnostics. Static
-   rotating buffer, two slots. */
+/* GNU quoteaf/quotef: shell-escape-always vs shell-escape rendering for
+   diagnostics. Static rotating buffers, two slots. */
 static const char *
-quote_af(const char *name)
+quote_style(const char *name, enum liszt_qstyle style)
 {
     static char *slots[2];
     static size_t caps[2];
     static int turn;
-    static const struct liszt_qopts af_opts = {
-        .style = LISZT_QS_SHELL_ESCAPE_ALWAYS
-    };
+    struct liszt_qopts opts = { .style = style };
 
     turn = 1 - turn;
     size_t need = liszt_quotearg_buffer(slots[turn], caps[turn], name,
-                                        (size_t)-1, &af_opts);
+                                        (size_t)-1, &opts);
     if (need >= caps[turn]) {
         caps[turn] = need + 1;
         slots[turn] = liszt_xrealloc(slots[turn], caps[turn]);
         liszt_quotearg_buffer(slots[turn], caps[turn], name, (size_t)-1,
-                              &af_opts);
+                              &opts);
     }
     return slots[turn];
+}
+
+static const char *
+quote_af(const char *name)
+{
+    return quote_style(name, LISZT_QS_SHELL_ESCAPE_ALWAYS);
+}
+
+static const char *
+quote_f(const char *name)
+{
+    return quote_style(name, LISZT_QS_SHELL_ESCAPE);
 }
 
 static void
@@ -453,15 +463,20 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     }
 
     size_t nlen = emit_name_colored(it, false, prefix_len);
-    if (it->ftype == LISZT_T_LNK && it->linkname) {
-        liszt_emit_str(" -> ");
-        emit_name_colored(it, true, prefix_len + nlen + 4);
-        if (cur_opts->indicator_style != LISZT_IND_NONE) {
-            char ic = type_indicator_char(true, it->linkmode,
-                                          LISZT_T_UNKNOWN,
-                                          cur_opts->indicator_style);
-            if (ic)
-                liszt_emit_byte(ic);
+    /* GNU branches on filetype==symbolic_link FIRST: a symlink with no
+       readable target prints neither arrow nor indicator (fuzz-pinned
+       via failed -L stats). */
+    if (it->ftype == LISZT_T_LNK) {
+        if (it->linkname) {
+            liszt_emit_str(" -> ");
+            emit_name_colored(it, true, prefix_len + nlen + 4);
+            if (cur_opts->indicator_style != LISZT_IND_NONE) {
+                char ic = type_indicator_char(true, it->linkmode,
+                                              LISZT_T_UNKNOWN,
+                                              cur_opts->indicator_style);
+                if (ic)
+                    liszt_emit_byte(ic);
+            }
         }
     } else if (cur_opts->indicator_style != LISZT_IND_NONE) {
         char ic = type_indicator_char(it->stat_ok, it->st->mode,
@@ -700,6 +715,65 @@ classify_operand(const char *name, const struct liszt_options *o,
     return true;
 }
 
+/* --- recursion queue and loop detection ------------------------------- */
+
+/* GNU's pending_dirs LIFO. Marker entries (name == NULL) pop the
+   active-directory set when a directory's subtree is done, keeping the
+   set ancestors-only. */
+struct pending {
+    char *name;         /* NULL = marker */
+    bool command_line;
+    struct pending *next;
+};
+
+static struct pending *pending_dirs;
+
+static void
+queue_directory(const char *name, bool command_line)
+{
+    struct pending *p = liszt_xmalloc(sizeof *p);
+
+    p->name = name ? liszt_xstrdup(name) : NULL;
+    p->command_line = command_line;
+    p->next = pending_dirs;
+    pending_dirs = p;
+}
+
+/* Active (dev,ino) set: linear array - depth-bounded (ancestors only),
+   and lookups walk the whole visited set as GNU's hash does. */
+struct dev_ino {
+    dev_t dev;
+    ino_t ino;
+};
+
+static struct dev_ino *active_dirs;
+static size_t active_len;
+static size_t active_cap;
+
+static bool
+visit_dir(dev_t dev, ino_t ino)
+{
+    for (size_t i = 0; i < active_len; i++)
+        if (active_dirs[i].dev == dev && active_dirs[i].ino == ino)
+            return true;
+    if (active_len == active_cap) {
+        active_cap = active_cap ? active_cap * 2 : 32;
+        active_dirs = liszt_xrealloc(active_dirs,
+                                     active_cap * sizeof *active_dirs);
+    }
+    active_dirs[active_len].dev = dev;
+    active_dirs[active_len].ino = ino;
+    active_len++;
+    return false;
+}
+
+static void
+pop_active_dir(void)
+{
+    if (active_len > 0)
+        active_len--;
+}
+
 /* --- directories ------------------------------------------------------ */
 
 struct dir_diag_ctx {
@@ -749,11 +823,15 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 && plan.stat_exec);
 
         if (check_stat) {
-            if (liszt_statx_join(dirname, nm, plan.stat_wants, false,
-                                 &m->st) == 0) {
+            bool follow = o->deref == LISZT_DEREF_ALWAYS;
+            /* Any stat implies MODE: conditional fetches (symlink
+               resolution under -L/-R, exec bits, dir color bits) exist
+               to read it, and the ftype re-derivation depends on it. */
+            if (liszt_statx_join(dirname, nm,
+                                 plan.stat_wants | LISZT_WANT_MODE,
+                                 follow, &m->st) == 0) {
                 m->stat_ok = 1;
-                if (plan.stat_wants & LISZT_WANT_MODE)
-                    e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
+                e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
             } else {
                 file_failure(false, "cannot access %s",
                              liszt_join_path(dirname, nm), errno);
@@ -1000,27 +1078,48 @@ emit_entries(const struct liszt_options *o, struct liszt_entries *es,
     free(items);
 }
 
-/* GNU print_dir: header when print_dir_name, blank line before every
-   header but the first output block (static first). */
+/* GNU print_dir: loop detection before reading, header when recursive
+   or print_dir_name (blank line before every header but the first),
+   subdirectory extraction in sorted order after sorting. */
 static void
 print_dir(const char *name, bool command_line, bool print_dir_name,
           bool *first, const struct liszt_options *o,
           struct liszt_entries *es)
 {
     struct dir_diag_ctx dc = { name, command_line };
+    struct liszt_dir *dh;
 
-    if (liszt_dirread_collect(name, o->ignore, es, on_dirread_fail, &dc)
-        < 0) {
+    /* GNU's ordering: opendir failure diagnoses first; loop detection
+       runs on the open handle; only then are entries read. */
+    if (liszt_diropen(name, &dh) < 0) {
         file_failure(command_line, "cannot open directory %s", name,
                      errno);
         return;
     }
+    if (o->recursive) {
+        struct liszt_statinfo di;
+        if (liszt_fstat(liszt_dirfd(dh), &di) < 0) {
+            file_failure(command_line,
+                         "cannot determine device and inode of %s", name,
+                         errno);
+            liszt_dirclose(dh);
+            return;
+        }
+        if (visit_dir(di.dev, di.ino)) {
+            fprintf(stderr, "%s: %s: not listing already-listed"
+                    " directory\n", liszt_prog, quote_f(name));
+            liszt_dirclose(dh);
+            liszt_set_exit_status(true);
+            return;
+        }
+    }
+    liszt_dirread_collect_from(dh, o->ignore, es, on_dirread_fail, &dc);
 
     fill_meta(name, o, es);
     decorate_entries(o, es);
     liszt_sort_entries(es);
 
-    if (print_dir_name) {
+    if (o->recursive || print_dir_name) {
         if (!*first)
             liszt_emit_byte('\n');
         *first = false;
@@ -1033,6 +1132,22 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
         liszt_emit_bytes(hq, hlen);
         liszt_emit_str(":\n");
     }
+
+    if (o->recursive) {
+        /* Marker first, then subdirs in reverse sorted order: the LIFO
+           pops them forward, depth-first (GNU extract_dirs_from_files). */
+        queue_directory(NULL, false);
+        for (size_t i = es->len; i > 0; i--) {
+            const struct liszt_entry *e = &es->v[i - 1];
+            if (e->ftype != LISZT_T_DIR)
+                continue;
+            const char *en = liszt_entry_name(es, e);
+            if (strcmp(en, ".") == 0 || strcmp(en, "..") == 0)
+                continue;
+            queue_directory(liszt_join_path(name, en), false);
+        }
+    }
+
     emit_entries(o, es, true);
 }
 
@@ -1145,13 +1260,27 @@ main(int argc, char **argv)
     liszt_entries_init(&es);
     bool first = true;
 
+    /* Seed the pending queue with command-line directories in reverse
+       (the LIFO pops them forward), then drain depth-first; markers pop
+       the active-ancestor set. */
     if (implicit_dot) {
-        print_dir(".", true, print_dir_name, &first, &o, &es);
+        queue_directory(".", true);
     } else {
-        for (int i = 0; i < n_ops; i++)
-            if (ops[i].is_dir)
-                print_dir(ops[i].name, true, print_dir_name, &first, &o,
-                          &es);
+        for (int i = n_ops; i > 0; i--)
+            if (ops[i - 1].is_dir)
+                queue_directory(ops[i - 1].name, true);
+    }
+    while (pending_dirs) {
+        struct pending *p = pending_dirs;
+        pending_dirs = p->next;
+        if (p->name == NULL) {
+            pop_active_dir();
+        } else {
+            print_dir(p->name, p->command_line, print_dir_name, &first,
+                      &o, &es);
+        }
+        free(p->name);
+        free(p);
     }
 
     liszt_entries_free(&es);

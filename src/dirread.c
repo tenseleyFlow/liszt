@@ -24,10 +24,18 @@ liszt_dirread_collect(const char *path, enum liszt_ignore_mode mode,
 {
     struct liszt_dir *d;
 
-    liszt_entries_clear(out);
     if (liszt_diropen(path, &d) < 0)
         return -1;
+    liszt_dirread_collect_from(d, mode, out, diag, ctx);
+    return 0;
+}
 
+void
+liszt_dirread_collect_from(struct liszt_dir *d, enum liszt_ignore_mode mode,
+                           struct liszt_entries *out,
+                           liszt_dirread_diag diag, void *ctx)
+{
+    liszt_entries_clear(out);
     for (;;) {
         struct liszt_dirent e;
         int r = liszt_dirread(d, &e);
@@ -48,5 +56,4 @@ liszt_dirread_collect(const char *path, enum liszt_ignore_mode mode,
     /* No fclosedir-style error path in our reader today; close and keep
        whatever was collected, as GNU does after diagnosing. */
     liszt_dirclose(d);
-    return 0;
 }

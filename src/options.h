@@ -50,6 +50,7 @@ struct liszt_options {
     bool reverse;
     bool group_directories_first;
     bool immediate_dirs;
+    bool recursive;
     /* Long-format field selection. */
     bool print_owner;
     bool print_group;

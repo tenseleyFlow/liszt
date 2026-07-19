@@ -76,7 +76,7 @@ liszt_plan_color_update(const struct liszt_options *o, struct liszt_plan *p)
                 || liszt_color_is_colored(LISZT_C_SETGID)));
     p->stat_links = (o->print_inode || color
                      || o->indicator_style != LISZT_IND_NONE
-                     || o->group_directories_first)
+                     || o->group_directories_first || o->recursive)
         && (o->deref == LISZT_DEREF_ALWAYS
             || liszt_color_symlink_as_referent()
             || p->check_symlink_mode);

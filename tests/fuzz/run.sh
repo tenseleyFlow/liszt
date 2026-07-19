@@ -154,6 +154,12 @@ gen_plan() {
         else if (p < 0.25) flags = flags " -p"
         else if (p < 0.32) flags = flags " --file-type"
         p = rand()
+        if (p < 0.2) flags = flags " -R"
+        else if (p < 0.28) flags = flags " -d"
+        p = rand()
+        if (p < 0.12) flags = flags " -H"
+        else if (p < 0.24) flags = flags " -L"
+        p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
         # Long-lane extras compose with any format (frills) or -l.

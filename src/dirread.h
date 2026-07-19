@@ -31,4 +31,11 @@ int liszt_dirread_collect(const char *path, enum liszt_ignore_mode mode,
                           struct liszt_entries *out,
                           liszt_dirread_diag diag, void *ctx);
 
+/* Same, over an already-open handle (consumed and closed). Lets callers
+   order opendir failure before loop detection, as GNU does. */
+void liszt_dirread_collect_from(struct liszt_dir *d,
+                                enum liszt_ignore_mode mode,
+                                struct liszt_entries *out,
+                                liszt_dirread_diag diag, void *ctx);
+
 #endif
