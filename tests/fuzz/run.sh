@@ -178,7 +178,7 @@ gen_plan() {
         p = rand()
         if (p < 0.08) flags = flags " --zero"
         else if (p < 0.16) flags = flags " -D"
-        else if (p < 0.24) flags = flags " --hyperlink=always"
+        else if (pin && p < 0.24) flags = flags " --hyperlink=always"
         if (rand() < 0.2) flags = flags " -s"
         if (rand() < 0.2) flags = flags " -i"
         if (rand() < 0.15) flags = flags " -n"

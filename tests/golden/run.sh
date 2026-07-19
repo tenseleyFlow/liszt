@@ -825,9 +825,10 @@ run_case_pin911 8 "dired zero fatal" C 2 -- -D --zero "$work/zdir"
 run_case_pin911 8 "zero dired fatal" C 2 -- --zero -D "$work/zdir"
 run_case_color "$DEFCOLORS" 8 "dired color uncounted" C 0 -- -D --color=always "$work/zdir"
 
-# 08C: --hyperlink. Both tools run on the same host, so the hostname
-# embeds identically; the fixture covers every escaping class (space,
-# %, #, ?, UTF-8 bytes) plus symlink resolution through canonicalize.
+# 08C: --hyperlink, 9.11-pinned: the OSC 8 terminator changed from BEL
+# to ST between vintages (FreeBSD ports ships 9.9). Both tools run on
+# the same host, so the hostname embeds identically; the fixture covers
+# every escaping class plus symlink resolution through canonicalize.
 mkdir -p "$work/hldir"
 printf 'x\n' > "$work/hldir/sp ace"
 printf 'x\n' > "$work/hldir/pc%40"
@@ -835,23 +836,25 @@ printf 'x\n' > "$work/hldir/hash#q?"
 printf 'x\n' > "$work/hldir/u日x"
 ln -s "sp ace" "$work/hldir/ln1"
 ln -s zz-missing "$work/hldir/dang"
-run_case 8 "hyperlink single column" C 0 -- --hyperlink=always -1 "$work/hldir"
-run_case 8 "hyperlink utf8" "$U8" 0 -- --hyperlink=always -1 "$work/hldir"
-run_case 8 "hyperlink long" C 0 -- --hyperlink=always -l "$work/hldir"
-run_case 8 "hyperlink columns" C 0 -- --hyperlink=always -C "$work/hldir"
-run_case 8 "hyperlink auto piped" C 0 -- --hyperlink=auto -1 "$work/hldir"
-run_case 8 "hyperlink never" C 0 -- --hyperlink=never -1 "$work/hldir"
-run_case 8 "hyperlink bare is always" C 0 -- --hyperlink -1 "$work/hldir"
-run_case 8 "hyperlink operands" C 0 -- --hyperlink=always "$work/hldir" "$work/hldir/ln1"
-run_case 8 "hyperlink recursive" C 0 -- --hyperlink=always -R "$work/hldir"
-run_case 8 "hyperlink -d trailing slash" C 0 -- --hyperlink=always -d "$work/hldir/"
-run_case 8 "hyperlink dangling operand" C 0 -- --hyperlink=always "$work/hldir/dang"
-run_case 8 "hyperlink skip-quotes shell" C 0 -- --hyperlink=always --quoting-style=shell -1 "$work/hldir"
-run_case 8 "hyperlink skip-quotes c" C 0 -- --hyperlink=always -Q -1 "$work/hldir"
-run_case 8 "hyperlink then dired wins" C 0 -- --hyperlink=always -D "$work/hldir"
-run_case 8 "dired then hyperlink wins" C 0 -- -D --hyperlink=always "$work/hldir"
+run_case_pin911 8 "hyperlink single column" C 0 -- --hyperlink=always -1 "$work/hldir"
+run_case_pin911 8 "hyperlink utf8" "$U8" 0 -- --hyperlink=always -1 "$work/hldir"
+run_case_pin911 8 "hyperlink long" C 0 -- --hyperlink=always -l "$work/hldir"
+run_case_pin911 8 "hyperlink columns" C 0 -- --hyperlink=always -C "$work/hldir"
+run_case_pin911 8 "hyperlink auto piped" C 0 -- --hyperlink=auto -1 "$work/hldir"
+run_case_pin911 8 "hyperlink never" C 0 -- --hyperlink=never -1 "$work/hldir"
+run_case_pin911 8 "hyperlink bare is always" C 0 -- --hyperlink -1 "$work/hldir"
+run_case_pin911 8 "hyperlink operands" C 0 -- --hyperlink=always "$work/hldir" "$work/hldir/ln1"
+run_case_pin911 8 "hyperlink recursive" C 0 -- --hyperlink=always -R "$work/hldir"
+run_case_pin911 8 "hyperlink -d trailing slash" C 0 -- --hyperlink=always -d "$work/hldir/"
+run_case_pin911 8 "hyperlink dangling operand" C 0 -- --hyperlink=always "$work/hldir/dang"
+run_case_pin911 8 "hyperlink skip-quotes shell" C 0 -- --hyperlink=always --quoting-style=shell -1 "$work/hldir"
+run_case_pin911 8 "hyperlink skip-quotes c" C 0 -- --hyperlink=always -Q -1 "$work/hldir"
+run_case_pin911 8 "hyperlink then dired wins" C 0 -- --hyperlink=always -D "$work/hldir"
+run_case_pin911 8 "dired then hyperlink wins" C 0 -- -D --hyperlink=always "$work/hldir"
 run_case_pin911 8 "hyperlink when invalid" C 1 -- --hyperlink=bogus -1
-run_case_color "$DEFCOLORS" 8 "hyperlink with color" C 0 -- --hyperlink=always --color=always -1 "$work/hldir"
+if [ "$oracle_is_pin" -eq 1 ]; then
+    run_case_color "$DEFCOLORS" 8 "hyperlink with color" C 0 -- --hyperlink=always --color=always -1 "$work/hldir"
+fi
 
 # 08D: -Z context column (unlabeled tier: '?' everywhere; parity holds
 # because both tools read the same xattrs) and --author's owner-again
@@ -872,7 +875,7 @@ run_case 8 "context dired" C 0 -- -DZ "$work/zdir"
 run_case 8 "author long" C 0 -- -l --author "$work/zdir"
 run_case 8 "author with context" C 0 -- -lZa --author "$work/zdir"
 run_case 8 "author short ignored" C 0 -- -1 --author "$work/zdir"
-run_case 8 "hyperlink missing operand" C 2 -- --hyperlink=always "$work/zz-nope" "$work/zdir/a"
+run_case_pin911 8 "hyperlink missing operand" C 2 -- --hyperlink=always "$work/zz-nope" "$work/zdir/a"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
