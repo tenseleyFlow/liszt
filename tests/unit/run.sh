@@ -214,6 +214,157 @@ else
     note_fail "scan fuzz harness failed to compile"
 fi
 
+# Gitignore engine (sprint 14A): wildmatch against git's own t3070
+# corpus (tests/unit/data/wildmatch.tsv, columns: wildmatch pathmatch
+# TAB text TAB pattern), then the pattern-compiler rule battery
+# (negation last-wins, anchoring, dir-only, escaped trailing space,
+# nesting bases). Harness-compiled driver; the shipping binary only
+# links the engine.
+giwork=$(mktemp -d "${TMPDIR:-/tmp}/liszt-gi.XXXXXX")
+trap 'chmod -R u+rwx "$fixwork" 2>/dev/null; rm -rf "$fixwork" "$scanwork" "$giwork"' EXIT INT TERM
+cat > "$giwork/gitest.c" <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "gitignore.h"
+
+static int bad;
+
+static void
+corpus(const char *file)
+{
+    FILE *fp = fopen(file, "r");
+    char line[1024];
+    if (!fp) { puts("no-corpus"); exit(1); }
+    while (fgets(line, sizeof line, fp)) {
+        size_t n = strlen(line);
+        if (n && line[n - 1] == '\n') line[--n] = '\0';
+        /* "<wm> <pm>\t<text>\t<pattern>" */
+        char *t1 = strchr(line, '\t');
+        if (!t1) continue;
+        char *t2 = strchr(t1 + 1, '\t');
+        if (!t2) continue;
+        *t1 = *t2 = '\0';
+        int wm = line[0] == '1';
+        int pm = line[2] == '1';
+        const char *text = t1 + 1;
+        const char *pat = t2 + 1;
+        if (liszt_wildmatch(pat, text, LISZT_WM_PATHNAME) != wm) {
+            printf("wildmatch [%s] vs [%s]: want %d\n", pat, text, wm);
+            bad = 1;
+        }
+        if (liszt_wildmatch(pat, text, 0) != pm) {
+            printf("pathmatch [%s] vs [%s]: want %d\n", pat, text, pm);
+            bad = 1;
+        }
+    }
+    fclose(fp);
+}
+
+static struct liszt_gi_file gf;
+
+static void
+rules(const char *base, const char *buf)
+{
+    liszt_gi_file_free(&gf);
+    liszt_gi_file_parse(&gf, buf, strlen(buf), base, strlen(base));
+}
+
+static void
+expect(const char *path, int is_dir, int want)
+{
+    const char *sl = strrchr(path, '/');
+    size_t off = sl ? (size_t)(sl - path) + 1 : 0;
+    int got = liszt_gi_file_match(&gf, path, strlen(path), off,
+                                  is_dir != 0);
+    if (got != want) {
+        printf("rules [%s] dir=%d: want %d got %d\n", path, is_dir,
+               want, got);
+        bad = 1;
+    }
+}
+
+int
+main(int argc, char **argv)
+{
+    if (argc > 1) corpus(argv[1]);
+
+    /* Basename patterns match at any depth; last matching line wins. */
+    rules("", "*.log\n!important.log\n");
+    expect("a.log", 0, 1);
+    expect("sub/deep/b.log", 0, 1);
+    expect("important.log", 0, 0);
+    expect("sub/important.log", 0, 0);
+    expect("a.txt", 0, -1);
+
+    /* Reversed order: the exclude wins again. */
+    rules("", "!important.log\n*.log\n");
+    expect("important.log", 0, 1);
+
+    /* Slash anchors to the base; leading slash is spelling only. */
+    rules("", "/build\ndoc/frotz\n");
+    expect("build", 1, 1);
+    expect("sub/build", 1, -1);
+    expect("doc/frotz", 1, 1);
+    expect("a/doc/frotz", 1, -1);
+
+    /* Dir-only patterns ignore files of the same name. */
+    rules("", "cache/\n");
+    expect("cache", 1, 1);
+    expect("cache", 0, -1);
+
+    /* Escaped trailing space survives; unescaped ones trim. */
+    rules("", "spaced\\ \nplain   \n");
+    expect("spaced ", 0, 1);
+    expect("spaced", 0, -1);
+    expect("plain", 0, 1);
+
+    /* Comments and escaped specials. */
+    rules("", "#comment\n\\#literal\n\\!bang\n");
+    expect("#comment", 0, -1);
+    expect("#literal", 0, 1);
+    expect("!bang", 0, 1);
+
+    /* Double-star spans components; single star stays bounded. */
+    rules("", "foo/**/bar\nqux/*.o\n");
+    expect("foo/bar", 1, 1);
+    expect("foo/a/bar", 1, 1);
+    expect("foo/a/b/bar", 1, 1);
+    expect("qux/x.o", 0, 1);
+    expect("qux/sub/x.o", 0, -1);
+
+    /* Nested base: patterns anchor below it. */
+    rules("sub/dir", "/top\n*.tmp\n");
+    expect("sub/dir/top", 0, 1);
+    expect("sub/dir/deep/top", 0, -1);
+    expect("sub/dir/deep/x.tmp", 0, 1);
+
+    /* CRLF lines parse like git (CR stripped by the line splitter). */
+    rules("", "win.txt\r\n");
+    expect("win.txt", 0, 1);
+
+    /* Character classes with ranges and negation. */
+    rules("", "[a-c][!0-9].o\n");
+    expect("bx.o", 0, 1);
+    expect("b1.o", 0, -1);
+    expect("dx.o", 0, -1);
+
+    liszt_gi_file_free(&gf);
+    if (!bad) puts("ok");
+    return bad;
+}
+EOF
+checks=$((checks + 1))
+if cc -O2 -std=c11 -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 -I src \
+    -o "$giwork/gitest" "$giwork/gitest.c" \
+    src/gitignore.c src/util.c 2>"$giwork/cc.err"; then
+    out=$("$giwork/gitest" tests/unit/data/wildmatch.tsv)         || note_fail "gitignore driver: $out"
+    [ "$out" = "ok" ] || { echo "$out" | sed -n '1,6p' >&2; }
+else
+    sed -n '1,4p' "$giwork/cc.err" >&2
+    note_fail "gitignore driver failed to compile"
+fi
+
 # Makefile SRC list matches the files on disk (unwired sources fail loudly).
 listed=$(sed -n '/^SRC =/,/^$/p' Makefile | grep -o 'src/[a-z_/]*\.c' | sort)
 ondisk=$(ls src/*.c src/sys/*.c | sort)
