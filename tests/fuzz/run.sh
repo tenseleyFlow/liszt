@@ -184,6 +184,8 @@ gen_plan() {
         if (rand() < 0.15) flags = flags " -n"
         if (rand() < 0.15) flags = flags " -h"
         if (rand() < 0.1) flags = flags " -G"
+        if (rand() < 0.12) flags = flags " -Z"
+        if (rand() < 0.1) flags = flags " --author"
         sub(/^ /, "", flags)
 
         # Operands.

@@ -86,6 +86,12 @@ long liszt_xattr_list_join(const char *dir, const char *name, char *buf,
                            size_t size);
 
 /* Whether ATTR appears in DIR/NAME's xattr name list (one syscall). */
+/* Read one attribute's value (getfilecon shape): length or -1+errno,
+   ENOTSUP where the platform has no xattrs. */
+long liszt_xattr_value_join(const char *dir, const char *name,
+                            const char *attr, bool follow, char *buf,
+                            size_t size);
+
 bool liszt_xattr_list_has(const char *dir, const char *name,
                           const char *attr);
 

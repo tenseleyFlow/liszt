@@ -31,6 +31,7 @@ struct liszt_entrymeta {
                                = none/unread */
     uint32_t abs_off;       /* --hyperlink canonical path in the arena;
                                UINT32_MAX = none/failed */
+    uint32_t scontext_off;  /* -Z security context; UINT32_MAX = "?" */
     /* Decoration slots (sprint 04): quoted display form and width,
        computed at most once per entry. quoted_off == UINT32_MAX means
        the raw name IS the display form. */

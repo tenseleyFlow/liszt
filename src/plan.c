@@ -41,7 +41,7 @@ select_fetch_set(const struct liszt_options *o, struct liszt_plan *p)
     p->needs_stat = wants != 0;
     p->stat_wants = wants;
     p->needs_link_target = long_fmt;
-    p->needs_xattr = long_fmt;
+    p->needs_xattr = long_fmt || o->print_scontext;
     p->stat_dirs_for_color = false;
     p->stat_exec = false;
     p->stat_links = false;

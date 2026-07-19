@@ -190,6 +190,7 @@ struct lwidths {
     int size;
     int major;
     int minor;
+    int scontext;
     bool any_acl;
 };
 
@@ -203,6 +204,7 @@ struct litem {
     const struct liszt_statinfo *st;
     const char *linkname;       /* NULL = none */
     const char *absolute_name;  /* --hyperlink canonical path or NULL */
+    const char *scontext;       /* -Z context, "?" when absent */
     mode_t linkmode;
     enum liszt_ftype ftype;
     unsigned char stat_ok;
@@ -232,6 +234,11 @@ widths_add(struct lwidths *w, const struct liszt_options *o,
 
     if (it->acl)
         w->any_acl = true;
+    if (o->print_scontext) {
+        int slen = (int)strlen(it->scontext);
+        if (w->scontext < slen)
+            w->scontext = slen;
+    }
     if (!it->stat_ok)
         return;     /* GNU: failed stats contribute no widths */
 
@@ -540,6 +547,8 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getuser(st->uid),
                       (uintmax_t)st->uid, w->author);
+    if (o->print_scontext)
+        prefix_len += emit_id_field(it->scontext, 0, w->scontext);
     /* GNU resets its assembly buffer after flushing the id fields, so
        the wrap-check start column counts only what follows (a p - buf
        artifact print_name_with_quoting inherits; fuzz-pinned). */
@@ -628,6 +637,14 @@ emit_short_item(const struct liszt_options *o, const struct lwidths *w,
     if (o->print_with_color)
         liszt_color_set_normal();
     size_t fr = emit_frills_count(o, w, it);
+    if (o->print_scontext) {
+        char sbuf[64];
+        int n = snprintf(sbuf, sizeof sbuf, "%*s ",
+                         o->format == LISZT_FMT_COMMAS ? 0 : w->scontext,
+                         it->scontext);
+        liszt_emit_bytes(sbuf, (size_t)n);
+        fr += (size_t)n;
+    }
     emit_name_colored(it, false, start_col + fr);
     if (o->indicator_style != LISZT_IND_NONE) {
         char ic = type_indicator_char(it->stat_ok, it->st->mode,
@@ -656,6 +673,7 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
 struct operand {
     const char *name;
     char *absolute_name;        /* --hyperlink canonical path or NULL */
+    char *scontext;             /* -Z context; NULL = "?" */
     char *qname;                /* malloc'd display form, or NULL = raw */
     size_t qlen;
     int disp_width;
@@ -730,6 +748,7 @@ operand_to_litem(const struct operand *op, struct litem *it)
 {
     it->name = op->name;
     it->absolute_name = op->absolute_name;
+    it->scontext = op->scontext ? op->scontext : "?";
     it->qname = op->qname ? op->qname : op->name;
     it->qlen = op->qname ? op->qlen : strlen(op->name);
     it->width = op->disp_width;
@@ -787,6 +806,34 @@ probe_acl(const char *dir, const char *name, bool is_dir)
             ctx = true;
     }
     return acl ? 2 : ctx ? 1 : 0;
+}
+
+/* getfilecon shape: security.selinux value or "?"; failures other
+   than the unsupported class are diagnosed without touching the exit
+   status (GNU error(0,...)). Returns malloc'd context or NULL. */
+static char *
+fetch_scontext(const char *dir, const char *name, bool follow)
+{
+    char cbuf[256];
+    long cn = liszt_xattr_value_join(dir, name, "security.selinux",
+                                     follow, cbuf, sizeof cbuf);
+    if (cn > 0) {
+        if (cbuf[cn - 1] == '\0')
+            cn--;
+        if (cn > 0) {
+            char *s = liszt_xmalloc((size_t)cn + 1);
+            memcpy(s, cbuf, (size_t)cn);
+            s[cn] = '\0';
+            return s;
+        }
+        return NULL;
+    }
+    if (cn < 0 && errno != ENOTSUP && errno != ENODATA
+        && errno != EOPNOTSUPP)
+        fprintf(stderr, "%s: %s: %s\n", liszt_prog,
+                quote_f(*dir ? liszt_join_path(dir, name) : name),
+                strerror(errno));
+    return NULL;
 }
 
 /* GNU gobble_file's dereference chain for command-line operands,
@@ -854,6 +901,12 @@ classify_operand(const char *name, const struct liszt_options *o,
             liszt_xattr_list_has("", name, "security.capability");
     if (plan.needs_xattr)
         out->acl = probe_acl("", name, out->is_dir);
+    if (o->print_scontext)
+        out->scontext = fetch_scontext("", name,
+                                       o->deref == LISZT_DEREF_ALWAYS
+                                       || o->deref
+                                          == LISZT_DEREF_COMMAND_LINE_ARGUMENTS
+                                       || out->is_dir);
     return true;
 }
 
@@ -1023,6 +1076,16 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 liszt_xattr_list_has(dirname, nm, "security.capability");
         if (plan.needs_xattr)
             m->acl = probe_acl(dirname, nm, e->ftype == LISZT_T_DIR);
+        if (o->print_scontext) {
+            char *sc = fetch_scontext(dirname, nm,
+                                      o->deref == LISZT_DEREF_ALWAYS);
+            if (sc) {
+                m->scontext_off =
+                    liszt_entries_add_bytes(es, sc, strlen(sc));
+                free(sc);
+                nm = liszt_entry_name(es, e);
+            }
+        }
     }
 }
 
@@ -1052,6 +1115,9 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
     it->absolute_name = (m && m->abs_off != UINT32_MAX)
         ? (const char *)es->arena + m->abs_off
         : NULL;
+    it->scontext = (m && m->scontext_off != UINT32_MAX)
+        ? (const char *)es->arena + m->scontext_off
+        : "?";
     it->linkmode = m ? m->linkmode : 0;
     it->ftype = e->ftype;
     it->stat_ok = m ? m->stat_ok : 0;
@@ -1107,7 +1173,7 @@ static bool
 needs_columns(const struct liszt_options *o)
 {
     return o->format == LISZT_FMT_LONG || o->print_block_size
-        || o->print_inode;
+        || o->print_inode || o->print_scontext;
 }
 
 struct batch_ctx {
@@ -1148,6 +1214,9 @@ item_length(const struct liszt_options *o, const struct lwidths *w,
                              o->output_block_size))
                        : 1)
                     : (size_t)w->blocks);
+    if (o->print_scontext)
+        len += 1 + (o->format == LISZT_FMT_COMMAS
+                    ? strlen(it->scontext) : (size_t)w->scontext);
     len += (size_t)(it->width + it->padded);
     if (o->indicator_style != LISZT_IND_NONE
         && type_indicator_char(it->stat_ok, it->st->mode, it->ftype,

@@ -145,6 +145,7 @@ struct staging {
     bool print_owner;
     bool print_group;
     bool print_author;
+    bool print_scontext;
     bool numeric_ids;
     bool print_block_size;
     bool print_inode;
@@ -416,6 +417,9 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_HIDE:
         add_pattern(&st->hide_patterns, &st->n_hide_patterns, value);
+        break;
+    case 'Z':
+        st->print_scontext = true;
         break;
     case 'D':
         /* GNU: -D stages long format and drops --hyperlink; both are
@@ -786,6 +790,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .print_owner = true,
         .print_group = true,
         .print_author = false,
+        .print_scontext = false,
         .numeric_ids = false,
         .print_block_size = false,
         .print_inode = false,
@@ -887,6 +892,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     /* --dired implies long format; silently self-disables if a later
        format word overrode that (GNU: dired &= format == long). The
        --zero clash is fatal only when dired survives. */
+    o->print_scontext = st.print_scontext;
     o->print_hyperlink = st.print_hyperlink;
     o->dired = st.dired && o->format == LISZT_FMT_LONG
         && !o->print_hyperlink;

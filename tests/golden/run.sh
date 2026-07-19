@@ -853,6 +853,26 @@ run_case 8 "dired then hyperlink wins" C 0 -- -D --hyperlink=always "$work/hldir
 run_case_pin911 8 "hyperlink when invalid" C 1 -- --hyperlink=bogus -1
 run_case_color "$DEFCOLORS" 8 "hyperlink with color" C 0 -- --hyperlink=always --color=always -1 "$work/hldir"
 
+# 08D: -Z context column (unlabeled tier: '?' everywhere; parity holds
+# because both tools read the same xattrs) and --author's owner-again
+# column. The context field participates in short-format cells too.
+run_case 8 "context short default" C 0 -- -Z "$work/zdir"
+run_case 8 "context single column" C 0 -- -Z1 "$work/zdir"
+run_case 8 "context long" C 0 -- -lZ "$work/zdir"
+run_case 8 "context columns" C 0 -- -ZC "$work/zdir"
+run_case 8 "context across" C 0 -- -Zx "$work/zdir"
+run_case 8 "context commas" C 0 -- -Zm "$work/zdir"
+run_case 8 "context word" C 0 -- --context -1 "$work/zdir"
+run_case 8 "context file operand" C 0 -- -Z "$work/zdir/a"
+run_case 8 "context mixed operands" C 0 -- -lZ "$work/zdir/a" "$work/zdir"
+run_case 8 "context recursive" C 0 -- -ZR "$work/zdir"
+run_case 8 "context with blocks" C 0 -- -Zs "$work/zdir"
+run_case 8 "context zero" C 0 -- -Z --zero "$work/zdir"
+run_case 8 "context dired" C 0 -- -DZ "$work/zdir"
+run_case 8 "author long" C 0 -- -l --author "$work/zdir"
+run_case 8 "author with context" C 0 -- -lZa --author "$work/zdir"
+run_case 8 "author short ignored" C 0 -- -1 --author "$work/zdir"
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

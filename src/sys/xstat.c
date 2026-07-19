@@ -247,6 +247,27 @@ liszt_readlink_join(const char *dir, const char *name)
 }
 
 long
+liszt_xattr_value_join(const char *dir, const char *name, const char *attr,
+                       bool follow, char *buf, size_t size)
+{
+#if LISZT_HAVE_GETXATTR
+    const char *path = liszt_join_path(dir, name);
+    ssize_t n = follow ? getxattr(path, attr, buf, size)
+                       : lgetxattr(path, attr, buf, size);
+    return n < 0 ? -1 : (long)n;
+#elif LISZT_HAVE_GETXATTR_DARWIN
+    ssize_t n = getxattr(liszt_join_path(dir, name), attr, buf, size, 0,
+                         follow ? 0 : XATTR_NOFOLLOW);
+    return n < 0 ? -1 : (long)n;
+#else
+    (void)dir; (void)name; (void)attr; (void)follow; (void)buf;
+    (void)size;
+    errno = ENOTSUP;
+    return -1;
+#endif
+}
+
+long
 liszt_xattr_list_join(const char *dir, const char *name, char *buf,
                       size_t size)
 {

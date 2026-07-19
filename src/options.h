@@ -63,6 +63,7 @@ struct liszt_options {
     bool print_owner;
     bool print_group;
     bool print_author;
+    bool print_scontext;        /* -Z: context column/field */
     bool numeric_ids;
     /* Columns valid in every format. */
     bool print_block_size;      /* -s */
