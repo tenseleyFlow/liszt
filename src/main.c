@@ -192,6 +192,177 @@ file_failure(bool serious, const char *fmt_with_name, const char *name,
     liszt_set_exit_status(serious);
 }
 
+/* --- --color=full metadata theme (v0.3 extension) ---------------------
+
+   eza's default theme (default_theme.rs, nu-ansi-term -> SGR), byte
+   content untouched: only SGR wrapping is added, padding stays outside
+   every color region, and everything rides the color funnel so dired
+   accounting holds. Stripping SGR must reproduce --color=always bytes
+   exactly (the fuzz oracle). */
+
+#define CF_STYLE(name, seq) \
+    static const struct liszt_binstr name = { sizeof seq - 1, seq }
+CF_STYLE(cf_punct, "1;90");
+CF_STYLE(cf_ur, "1;33");
+CF_STYLE(cf_uw, "1;31");
+CF_STYLE(cf_ux_file, "1;4;32");
+CF_STYLE(cf_ux, "1;32");
+CF_STYLE(cf_gr, "33");
+CF_STYLE(cf_gw, "31");
+CF_STYLE(cf_gx, "32");
+CF_STYLE(cf_special, "35");
+CF_STYLE(cf_dir, "1;34");
+CF_STYLE(cf_lnk, "36");
+CF_STYLE(cf_fifo, "33");
+CF_STYLE(cf_dev, "1;33");
+CF_STYLE(cf_sock, "1;31");
+CF_STYLE(cf_nlink, "1;31");
+CF_STYLE(cf_mhlink, "31;43");
+CF_STYLE(cf_yours, "1;33");
+CF_STYLE(cf_sz_b, "32");
+CF_STYLE(cf_sz_k, "1;32");
+CF_STYLE(cf_sz_m, "33");
+CF_STYLE(cf_sz_g, "31");
+CF_STYLE(cf_sz_h, "35");
+CF_STYLE(cf_major, "1;32");
+CF_STYLE(cf_minor, "32");
+CF_STYLE(cf_date, "34");
+CF_STYLE(cf_inode, "35");
+CF_STYLE(cf_blocks, "36");
+CF_STYLE(cf_dim, "2");
+CF_STYLE(cf_se_user, "34");
+CF_STYLE(cf_se_role, "32");
+CF_STYLE(cf_se_type, "33");
+CF_STYLE(cf_se_range, "36");
+
+static uid_t cf_uid;
+static gid_t cf_gids[64];
+static int cf_n_gids = -1;
+
+static void
+cf_init_identity(void)
+{
+    cf_uid = getuid();
+    cf_n_gids = getgroups(64, cf_gids);
+    if (cf_n_gids < 0)
+        cf_n_gids = 0;
+}
+
+static bool
+cf_my_group(gid_t g)
+{
+    if (g == getgid())
+        return true;
+    for (int i = 0; i < cf_n_gids; i++)
+        if (cf_gids[i] == g)
+            return true;
+    return false;
+}
+
+/* One styled token through the funnel; NULL style = plain bytes. */
+static void
+cf_put(const struct liszt_binstr *sty, const char *bytes, size_t len)
+{
+    if (sty == NULL) {
+        liszt_emit_bytes(bytes, len);
+        return;
+    }
+    liszt_color_start(sty);
+    liszt_emit_bytes(bytes, len);
+    liszt_color_prep_non_filename();
+}
+
+static const struct liszt_binstr *
+cf_mode_char_style(size_t idx, char ch, bool reg)
+{
+    if (ch == '-')
+        return idx == 0 ? NULL : &cf_punct;
+    if (idx == 0)
+        switch (ch) {
+        case 'd': return &cf_dir;
+        case 'l': return &cf_lnk;
+        case 'p': return &cf_fifo;
+        case 'b':
+        case 'c': return &cf_dev;
+        case 's': return &cf_sock;
+        default: return NULL;
+        }
+    switch (ch) {
+    case 'r': return idx <= 3 ? &cf_ur : idx <= 6 ? &cf_gr : &cf_gr;
+    case 'w': return idx <= 3 ? &cf_uw : &cf_gw;
+    case 'x': return idx <= 3 ? (reg ? &cf_ux_file : &cf_ux) : &cf_gx;
+    case 's':
+    case 'S':
+    case 't':
+    case 'T': return &cf_special;
+    default: return NULL;    /* '?' rows, acl suffix */
+    }
+}
+
+static size_t
+cf_emit_mode(const char *modebuf, bool reg)
+{
+    size_t n = strlen(modebuf);
+    for (size_t i = 0; i < n; i++)
+        cf_put(cf_mode_char_style(i, modebuf[i], reg), modebuf + i, 1);
+    return n;
+}
+
+static const struct liszt_binstr *
+cf_size_style(uintmax_t v)
+{
+    if (v < 1000u) return &cf_sz_b;
+    if (v < 1000000u) return &cf_sz_k;
+    if (v < 1000000000u) return &cf_sz_m;
+    if (v < 1000000000000u) return &cf_sz_g;
+    return &cf_sz_h;
+}
+
+/* Right-aligned styled token: pad plain, token colored. Returns the
+   visible length including the trailing space. */
+static size_t
+cf_emit_field(const struct liszt_binstr *sty, int width,
+              const char *token)
+{
+    size_t tlen = strlen(token);
+    int pad = width - (int)tlen;
+    for (int i = 0; i < pad; i++)
+        liszt_emit_byte(' ');
+    cf_put(sty, token, tlen);
+    liszt_emit_byte(' ');
+    return (size_t)(pad > 0 ? pad : 0) + tlen + 1;
+}
+
+/* SELinux context split: user:role:type:range with dimmed colons;
+   contextless "?" stays plain. */
+static size_t
+cf_emit_scontext(const char *ctx, int width)
+{
+    static const struct liszt_binstr *const part_sty[4] = {
+        &cf_se_user, &cf_se_role, &cf_se_type, &cf_se_range
+    };
+    size_t total = strlen(ctx);
+    if (strchr(ctx, ':') == NULL)
+        return cf_emit_field(NULL, width, ctx);
+    int pad = width - (int)total;
+    for (int i = 0; i < pad; i++)
+        liszt_emit_byte(' ');
+    size_t part = 0;
+    const char *p = ctx;
+    while (*p != '\0') {
+        size_t seg = strcspn(p, ":");
+        cf_put(part_sty[part < 3 ? part : 3], p, seg);
+        p += seg;
+        if (*p == ':') {
+            cf_put(&cf_dim, p, 1);
+            p++;
+        }
+        part++;
+    }
+    liszt_emit_byte(' ');
+    return (size_t)(pad > 0 ? pad : 0) + total + 1;
+}
+
 /* --- per-listing rendering state ------------------------------------- */
 
 /* Column width maxima for one listing batch (a directory or the
@@ -391,6 +562,11 @@ emit_name_colored(const struct litem *it, bool symlink_target,
     }
     if (cur_opts->print_with_color) {
         color = liszt_color_for(&cinfo);
+        /* Full theme: eza's filename classes catch what LS_COLORS
+           left plain, regular files only, never symlink targets. */
+        if (color == NULL && cur_opts->color_full && !symlink_target
+            && liszt_file_class(&cinfo) == LISZT_C_FILE)
+            color = liszt_colorclass_for(it->name, it->name_len);
         used_this = color || liszt_color_is_colored(LISZT_C_NORM);
     }
 
@@ -509,12 +685,22 @@ emit_frills_count(const struct liszt_options *o, const struct lwidths *w,
     size_t total = 0;
 
     if (o->print_inode) {
+        if (o->color_full) {
+            char nb[32];
+            if (it->stat_ok)
+                snprintf(nb, sizeof nb, "%ju", (uintmax_t)it->st->ino);
+            else
+                snprintf(nb, sizeof nb, "?");
+            total += cf_emit_field(it->stat_ok ? &cf_inode : NULL, iw,
+                                   nb);
+        } else {
         int n = it->stat_ok
             ? snprintf(buf, sizeof buf, "%*ju ", iw,
                        (uintmax_t)it->st->ino)
             : snprintf(buf, sizeof buf, "%*s ", iw, "?");
         liszt_emit_bytes(buf, (size_t)n);
         total += (size_t)n;
+        }
     }
     if (o->print_block_size) {
         const char *blocks = !it->stat_ok
@@ -522,17 +708,24 @@ emit_frills_count(const struct liszt_options *o, const struct lwidths *w,
             : liszt_human_readable((uintmax_t)it->st->blocks, hbuf,
                                    o->human_output_opts, ST_NBLOCKSIZE,
                                    o->output_block_size);
+        if (o->color_full) {
+            total += cf_emit_field(it->stat_ok ? &cf_blocks : NULL,
+                                   bw, blocks);
+        } else {
         int n = snprintf(buf, sizeof buf, "%*s ", bw, blocks);
         liszt_emit_bytes(buf, (size_t)n);
         total += (size_t)n;
+        }
     }
     return total;
 }
 
 /* GNU format_user_or_group: a name gets gap+1 trailing spaces; numeric
-   ids render right-aligned with one trailing space. Returns bytes. */
+   ids render right-aligned with one trailing space. Returns visible
+   bytes; STY (may be NULL) colors the value, never the padding. */
 static size_t
-emit_id_field(const char *name, uintmax_t id, int width)
+emit_id_field(const char *name, uintmax_t id, int width,
+              const struct liszt_binstr *sty)
 {
     char buf[64];
 
@@ -540,15 +733,21 @@ emit_id_field(const char *name, uintmax_t id, int width)
         int gap = width - (int)strlen(name);
         int pad = gap > 0 ? gap : 0;
         size_t total = strlen(name) + (size_t)pad + 1;
-        liszt_emit_str(name);
+        cf_put(sty, name, strlen(name));
         do
             liszt_emit_byte(' ');
         while (pad--);
         return total;
     }
-    int n = snprintf(buf, sizeof buf, "%*ju ", width, id);
-    liszt_emit_bytes(buf, (size_t)n);
-    return (size_t)n;
+    int n = snprintf(buf, sizeof buf, "%ju", id);
+    if (sty == NULL) {
+        int r = snprintf(buf, sizeof buf, "%*ju ", width, id);
+        liszt_emit_bytes(buf, (size_t)r);
+        return (size_t)r;
+    }
+    (void)n;
+    snprintf(buf, sizeof buf, "%ju", id);
+    return cf_emit_field(sty, width, buf);
 }
 
 static size_t emit_frills_count(const struct liszt_options *o,
@@ -591,6 +790,22 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     /* else: strmode's ' ' stands, aligning with suffixed neighbors */
 
     int n;
+    if (o->color_full) {
+        bool reg = it->stat_ok ? S_ISREG(st->mode)
+                               : it->ftype == LISZT_T_REG;
+        prefix_len += cf_emit_mode(modebuf, reg);
+        liszt_emit_byte(' ');
+        prefix_len += 1;
+        if (it->stat_ok) {
+            const struct liszt_binstr *ls =
+                reg && st->nlink > 1 ? &cf_mhlink : &cf_nlink;
+            char nb[32];
+            snprintf(nb, sizeof nb, "%ju", (uintmax_t)st->nlink);
+            prefix_len += cf_emit_field(ls, w->nlink, nb);
+        } else {
+            prefix_len += cf_emit_field(NULL, w->nlink, "?");
+        }
+    } else {
     if (it->stat_ok)
         n = snprintf(buf, sizeof buf, "%s %*ju ", modebuf, w->nlink,
                      (uintmax_t)st->nlink);
@@ -598,21 +813,28 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         n = snprintf(buf, sizeof buf, "%s %*s ", modebuf, w->nlink, "?");
     liszt_emit_bytes(buf, (size_t)n);
     prefix_len += (size_t)n;
+    }
 
+    const struct liszt_binstr *ust = o->color_full && it->stat_ok
+        && st->uid == cf_uid ? &cf_yours : NULL;
+    const struct liszt_binstr *gst = o->color_full && it->stat_ok
+        && cf_my_group(st->gid) ? &cf_yours : NULL;
     if (o->print_owner)
         prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getuser(st->uid),
-                      (uintmax_t)st->uid, w->owner);
+                      (uintmax_t)st->uid, w->owner, ust);
     if (o->print_group)
         prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getgroup(st->gid),
-                      (uintmax_t)st->gid, w->group);
+                      (uintmax_t)st->gid, w->group, gst);
     if (o->print_author)
         prefix_len += emit_id_field(!it->stat_ok ? "?"
                       : o->numeric_ids ? NULL : liszt_getuser(st->uid),
-                      (uintmax_t)st->uid, w->author);
+                      (uintmax_t)st->uid, w->author, ust);
     if (o->print_scontext)
-        prefix_len += emit_id_field(it->scontext, 0, w->scontext);
+        prefix_len += o->color_full
+            ? cf_emit_scontext(it->scontext, w->scontext)
+            : emit_id_field(it->scontext, 0, w->scontext, NULL);
     /* GNU resets its assembly buffer after flushing the id fields, so
        the wrap-check start column counts only what follows (a p - buf
        artifact print_name_with_quoting inherits; fuzz-pinned). */
@@ -620,6 +842,22 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         prefix_len = 0;
 
     if (it->stat_ok && (S_ISCHR(st->mode) || S_ISBLK(st->mode))) {
+        if (o->color_full) {
+            int blanks = w->size - (w->major + 2 + w->minor);
+            char db[32];
+            snprintf(db, sizeof db, "%ju", (uintmax_t)major(st->rdev));
+            size_t dl = strlen(db);
+            int mw = w->major + (blanks > 0 ? blanks : 0);
+            for (int i = 0; i < mw - (int)dl; i++)
+                liszt_emit_byte(' ');
+            cf_put(&cf_major, db, dl);
+            liszt_emit_byte(',');
+            liszt_emit_byte(' ');
+            prefix_len += (size_t)(mw > (int)dl ? mw - (int)dl : 0)
+                + dl + 2;
+            snprintf(db, sizeof db, "%ju", (uintmax_t)minor(st->rdev));
+            prefix_len += cf_emit_field(&cf_minor, w->minor, db);
+        } else {
         int blanks = w->size - (w->major + 2 + w->minor);
         n = snprintf(buf, sizeof buf, "%*ju, %*ju ",
                      w->major + (blanks > 0 ? blanks : 0),
@@ -627,15 +865,22 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
                      (uintmax_t)minor(st->rdev));
         liszt_emit_bytes(buf, (size_t)n);
         prefix_len += (size_t)n;
+        }
     } else {
         const char *size = !it->stat_ok
             ? "?"
             : liszt_human_readable((uintmax_t)st->size, hbuf,
                                    o->file_human_output_opts, 1,
                                    o->file_output_block_size);
+        if (o->color_full) {
+            const struct liszt_binstr *ss = it->stat_ok
+                ? cf_size_style((uintmax_t)st->size) : NULL;
+            prefix_len += cf_emit_field(ss, w->size, size);
+        } else {
         n = snprintf(buf, sizeof buf, "%*s ", w->size, size);
         liszt_emit_bytes(buf, (size_t)n);
         prefix_len += (size_t)n;
+        }
     }
 
     /* GNU's btime_ok: birth time selected but the fs has none - the
@@ -649,7 +894,10 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
     if (tlen != (size_t)-1) {
         /* Zero-length renders (empty +FORMAT, overflow) still emit the
            column space - GNU's s stays >= 0 for them. */
-        liszt_emit_bytes(tbuf, tlen);
+        if (o->color_full && tlen > 0)
+            cf_put(&cf_date, tbuf, tlen);
+        else
+            liszt_emit_bytes(tbuf, tlen);
         liszt_emit_byte(' ');
         prefix_len += tlen + 1;
     } else {
@@ -705,7 +953,12 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
        via failed -L stats). */
     if (it->ftype == LISZT_T_LNK) {
         if (it->linkname) {
-            liszt_emit_str(" -> ");
+            if (cur_opts->color_full) {
+                liszt_emit_byte(' ');
+                cf_put(&cf_punct, "->", 2);
+                liszt_emit_byte(' ');
+            } else
+                liszt_emit_str(" -> ");
             emit_name_colored(it, true, prefix_len + nlen + 4);
             if (cur_opts->indicator_style != LISZT_IND_NONE) {
                 char ic = type_indicator_char(true, it->linkmode,
@@ -734,12 +987,18 @@ emit_short_item(const struct liszt_options *o, const struct lwidths *w,
         liszt_color_set_normal();
     size_t fr = emit_frills_count(o, w, it);
     if (o->print_scontext) {
+        if (o->color_full) {
+            fr += cf_emit_scontext(it->scontext,
+                                   o->format == LISZT_FMT_COMMAS
+                                       ? 0 : w->scontext);
+        } else {
         char sbuf[64];
         int n = snprintf(sbuf, sizeof sbuf, "%*s ",
                          o->format == LISZT_FMT_COMMAS ? 0 : w->scontext,
                          it->scontext);
         liszt_emit_bytes(sbuf, (size_t)n);
         fr += (size_t)n;
+        }
     }
     if (tree_prefix.len) {
         liszt_emit_bytes(tree_prefix.bytes, tree_prefix.len);
@@ -2236,6 +2495,8 @@ main(int argc, char **argv)
 
     if (o.print_icons)
         liszt_icons_init(&o);
+    if (o.color_full)
+        cf_init_identity();
     liszt_plan_select(&o, &plan);
     liszt_plan_color_update(&o, &plan);
     liszt_plan_icons_update(&o, &plan);

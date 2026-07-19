@@ -1,6 +1,7 @@
 #include "colors.h"
 
 #include <fnmatch.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -532,6 +533,59 @@ liszt_color_for(const struct liszt_colorable *c)
     const struct liszt_binstr *s =
         ext ? &ext->seq : &color_indicator[type];
     return s->string ? s : NULL;
+}
+
+/* --- --color=full filename classes (v0.3) ------------------------------ */
+
+#include "colorclass_tab.h"
+
+/* Class order matches gen-colorclass-tab.sh: Image Video Music
+   Lossless Crypto Document Compressed Temp Compiled Build Source. */
+static const struct liszt_binstr lcc_styles[11] = {
+    { 2, "35" }, { 4, "1;35" }, { 2, "36" }, { 4, "1;36" },
+    { 4, "1;32" }, { 2, "32" }, { 2, "31" }, { 1, "2" },
+    { 2, "33" }, { 6, "1;4;33" }, { 4, "1;33" },
+};
+
+static unsigned char
+lcc_fold(unsigned char b)
+{
+    return (unsigned char)(b >= 'A' && b <= 'Z' ? b + 32 : b);
+}
+
+const struct liszt_binstr *
+liszt_colorclass_for(const char *name, size_t len)
+{
+    if (len == 0)
+        return NULL;
+    /* Case-insensitive readme prefix wins (eza's compatibility rule). */
+    if (len >= 6 && liszt_strncasecmp_c(name, "readme", 6) == 0)
+        return &lcc_styles[9];
+    unsigned char last = lcc_fold((unsigned char)name[len - 1]);
+    for (uint16_t i = lcc_name_bucket[last];
+         i < lcc_name_bucket[last + 1]; i++) {
+        const struct lcc_ent *e = &lcc_name_tab[i];
+        if (e->key_len == len
+            && memcmp(lcc_name_pool + e->key_off, name, len) == 0)
+            return &lcc_styles[e->class];
+    }
+    const char *dot = memrchr(name, '.', len);
+    if (dot != NULL && dot != name && dot[1] != '\0') {
+        const char *ext = dot + 1;
+        size_t elen = len - (size_t)(ext - name);
+        for (uint16_t i = lcc_ext_bucket[last];
+             i < lcc_ext_bucket[last + 1]; i++) {
+            const struct lcc_ent *e = &lcc_ext_tab[i];
+            if (e->key_len == elen
+                && liszt_strncasecmp_c(ext, lcc_ext_pool + e->key_off,
+                                       elen) == 0)
+                return &lcc_styles[e->class];
+        }
+    }
+    if (name[len - 1] == '~'
+        || (name[0] == '#' && name[len - 1] == '#' && len > 1))
+        return &lcc_styles[7];
+    return NULL;
 }
 
 /* --- emission ---------------------------------------------------------- */

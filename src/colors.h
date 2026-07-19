@@ -64,6 +64,12 @@ enum liszt_cind liszt_file_class(const struct liszt_colorable *c);
 /* get_color_indicator: the escape to paint with, or NULL. */
 const struct liszt_binstr *liszt_color_for(const struct liszt_colorable *c);
 
+/* --color=full filename-class fallback (v0.3): eza's filetype chain
+   (readme prefix, exact name, lowercased last-dot extension, temp
+   patterns) for regular files LS_COLORS left unstyled. NULL = none. */
+const struct liszt_binstr *liszt_colorclass_for(const char *name,
+                                                size_t len);
+
 /* Bytes of escape sequences emitted so far: color output is invisible
    to dired offsets, which count everything else. */
 off_t liszt_color_bytes(void);
