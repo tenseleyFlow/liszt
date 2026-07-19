@@ -569,7 +569,13 @@ liszt_colorclass_for(const char *name, size_t len)
             && memcmp(lcc_name_pool + e->key_off, name, len) == 0)
             return &lcc_styles[e->class];
     }
-    const char *dot = memrchr(name, '.', len);
+    /* memrchr is a GNU extension (absent on Darwin): scan back. */
+    const char *dot = NULL;
+    for (size_t i = len; i > 0; i--)
+        if (name[i - 1] == '.') {
+            dot = name + i - 1;
+            break;
+        }
     if (dot != NULL && dot != name && dot[1] != '\0') {
         const char *ext = dot + 1;
         size_t elen = len - (size_t)(ext - name);
