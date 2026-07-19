@@ -13,6 +13,7 @@
 #include "options.h"
 #include "plan.h"
 #include "sortkey.h"
+#include "sys/xstat.h"
 #include "util.h"
 
 static void
@@ -31,13 +32,19 @@ file_failure(bool serious, const char *fmt_with_name, const char *name,
 /* One classified command-line operand. */
 struct operand {
     const char *name;
+    off_t size;
+    struct timespec mtime;
     bool is_dir;
 };
 
-static const char *
-operand_name(const void *p)
+static void
+operand_item(const void *p, struct liszt_item *out)
 {
-    return ((const struct operand *)p)->name;
+    const struct operand *op = p;
+    out->name = op->name;
+    out->size = op->size;
+    out->mtime = op->mtime;
+    out->group_dir = false;     /* grouping cannot affect operand output */
 }
 
 /* GNU gobble_file's dereference chain for command-line operands under
@@ -49,26 +56,24 @@ static bool
 classify_operand(const char *name, const struct liszt_options *o,
                  struct operand *out)
 {
-    struct stat st;
+    struct liszt_statinfo st;
     int err;
 
     switch (o->deref) {
     case LISZT_DEREF_ALWAYS:
-        err = stat(name, &st);
-        break;
     case LISZT_DEREF_COMMAND_LINE_ARGUMENTS:
-        err = stat(name, &st);
+        err = liszt_stat_path(name, &st);
         break;
     case LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR:
-        err = stat(name, &st);
+        err = liszt_stat_path(name, &st);
         if (err < 0 ? (errno == ENOENT || errno == ELOOP)
-                    : !S_ISDIR(st.st_mode))
-            err = lstat(name, &st);
+                    : !S_ISDIR(st.mode))
+            err = liszt_lstat_path(name, &st);
         break;
     case LISZT_DEREF_NEVER:
     case LISZT_DEREF_UNDEFINED:
     default:
-        err = lstat(name, &st);
+        err = liszt_lstat_path(name, &st);
         break;
     }
 
@@ -77,7 +82,9 @@ classify_operand(const char *name, const struct liszt_options *o,
         return false;
     }
     out->name = name;
-    out->is_dir = S_ISDIR(st.st_mode) && !o->immediate_dirs;
+    out->size = st.size;
+    out->mtime = st.mtime;
+    out->is_dir = S_ISDIR(st.mode) && !o->immediate_dirs;
     return true;
 }
 
@@ -94,6 +101,54 @@ on_dirread_fail(void *ctx, enum liszt_dirread_fail how, int errnum)
                  how == LISZT_DIRFAIL_READ ? "reading directory '%s'"
                                            : "closing directory '%s'",
                  dc->name, errnum);
+}
+
+/* The plan's fetch set for sprint 02: lstat everything for -S/-t;
+   resolve DT_UNKNOWN and symlink targets when grouping needs them. GNU
+   diagnoses in-directory stat failures as minor and keeps the entry with
+   zeroed fields. */
+static void
+fill_meta(const char *dirname, const struct liszt_options *o,
+          struct liszt_entries *es)
+{
+    bool stat_all = o->sort == LISZT_SORT_SIZE
+        || o->sort == LISZT_SORT_TIME;
+    bool group = o->group_directories_first && o->sort != LISZT_SORT_NONE;
+
+    if (!stat_all && !group)
+        return;
+    liszt_entries_ensure_meta(es);
+
+    for (size_t i = 0; i < es->len; i++) {
+        struct liszt_entry *e = &es->v[i];
+        struct liszt_entrymeta *m = &es->meta[e->meta_idx];
+        const char *nm = liszt_entry_name(es, e);
+
+        if (stat_all || (group && e->ftype == LISZT_T_UNKNOWN)) {
+            struct liszt_statinfo si;
+            if (liszt_lstat_join(dirname, nm, &si) == 0) {
+                m->size = si.size;
+                m->mtime = si.mtime;
+                m->mode = si.mode;
+                m->stat_ok = 1;
+                if (e->ftype == LISZT_T_UNKNOWN)
+                    e->ftype = (uint8_t)(S_ISDIR(si.mode) ? LISZT_T_DIR
+                        : S_ISLNK(si.mode) ? LISZT_T_LNK
+                        : LISZT_T_REG);
+            } else {
+                file_failure(false, "cannot access '%s'",
+                             liszt_join_path(dirname, nm), errno);
+            }
+        }
+        if (group
+            && (e->ftype == LISZT_T_LNK
+                || (m->stat_ok && S_ISLNK(m->mode)))) {
+            struct liszt_statinfo ti;
+            /* Silent on failure: a dangling link simply is not a dir. */
+            if (liszt_stat_join(dirname, nm, &ti) == 0)
+                m->linkmode = ti.mode;
+        }
+    }
 }
 
 static void
@@ -122,6 +177,7 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
         return;
     }
 
+    fill_meta(name, o, es);
     liszt_sort_entries(es);
 
     if (print_dir_name) {
@@ -168,7 +224,7 @@ main(int argc, char **argv)
     /* GNU sorts the whole command-line batch (files and dirs together),
        then extracts dirs preserving that order. */
     if (o.sort != LISZT_SORT_NONE && n_ops > 1)
-        liszt_sort_operands(ops, (size_t)n_ops, sizeof *ops, operand_name);
+        liszt_sort_operands(ops, (size_t)n_ops, sizeof *ops, operand_item);
 
     int n_files = 0;
     int n_dirs = implicit_dot ? 1 : 0;

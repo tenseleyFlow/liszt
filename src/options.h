@@ -38,6 +38,7 @@ struct liszt_options {
     enum liszt_ignore_mode ignore;
     enum liszt_deref deref;
     bool reverse;
+    bool group_directories_first;
     bool immediate_dirs;
     char **operands;    /* argv-order pointers into argv; xmalloc'd array */
     int n_operands;

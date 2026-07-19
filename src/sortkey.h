@@ -3,9 +3,20 @@
 
 #include <stdbool.h>
 
+#include <sys/types.h>
+#include <time.h>
+
 #include "entry.h"
 #include "options.h"
 #include "plan.h"
+
+/* A comparator's view of one element: the chain reads only this. */
+struct liszt_item {
+    const char *name;
+    off_t size;
+    struct timespec mtime;
+    bool group_dir;     /* counts as a directory for grouping */
+};
 
 /* Collation identity probe, cached process-wide (rank's port): true when
    strcoll order provably equals byte order. Conservative: multibyte
@@ -22,14 +33,10 @@ void liszt_sort_init(const struct liszt_options *o,
    the scalar comparator chain; a mismatch is fatal (exit 2). */
 void liszt_sort_entries(struct liszt_entries *es);
 
-/* The scalar comparator chain over two names (also the verification
-   oracle). Includes -r. May report a strcoll failure per GNU semantics -
-   only call while a sort entry point is active. */
-int liszt_sort_cmp_names(const char *a, const char *b);
-
-/* Stable sort of the operand array (any element type; GET_NAME extracts
-   the name). setjmp-protected like liszt_sort_entries. */
+/* Stable sort of the operand array (any element type; GET_ITEM fills
+   the comparator's view). setjmp-protected like liszt_sort_entries. */
 void liszt_sort_operands(void *base, size_t n, size_t size,
-                         const char *(*get_name)(const void *));
+                         void (*get_item)(const void *,
+                                          struct liszt_item *));
 
 #endif

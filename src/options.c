@@ -125,6 +125,7 @@ struct staging {
     int sort_opt;       /* -1 or enum liszt_sortword */
     enum liszt_ignore_mode ignore;
     bool reverse;
+    bool group_directories_first;
     bool immediate_dirs;
     bool explicit_time; /* -c/-u seen; feeds the sort-resolution rule */
 };
@@ -239,6 +240,9 @@ handle(int key, const char *value, const char *display, struct staging *st)
            -l or color as ancient ls did). */
         st->ignore = LISZT_IGNORE_MINIMAL;
         st->sort_opt = LISZT_SORT_NONE;
+        break;
+    case KEY_GROUP_DIRS_FIRST:
+        st->group_directories_first = true;
         break;
     case KEY_SORT: {
         static const int vals[] = {
@@ -396,6 +400,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .sort_opt = -1,
         .ignore = LISZT_IGNORE_DEFAULT,
         .reverse = false,
+        .group_directories_first = false,
         .immediate_dirs = false,
         .explicit_time = false
     };
@@ -432,6 +437,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
        -c/-u rule is the explicit_time input below, nothing else. */
     o->ignore = st.ignore;
     o->reverse = st.reverse;
+    o->group_directories_first = st.group_directories_first;
     o->immediate_dirs = st.immediate_dirs;
     o->format = st.format_opt >= 0
         ? (enum liszt_format)st.format_opt
@@ -457,6 +463,8 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     case LISZT_SORT_NAME:
     case LISZT_SORT_EXTENSION:
     case LISZT_SORT_VERSION:
+    case LISZT_SORT_SIZE:
+    case LISZT_SORT_TIME:
         break;
     default:
         liszt_die(LISZT_STATUS_SERIOUS, 0,

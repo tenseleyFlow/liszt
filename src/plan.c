@@ -33,8 +33,13 @@ liszt_plan_select(const struct liszt_options *o, struct liszt_plan *p)
         p->reason = "hard locale, transform once";
         return;
     }
+    if (o->sort == LISZT_SORT_SIZE || o->sort == LISZT_SORT_TIME) {
+        p->sort_engine = LISZT_PLAN_SORT_RADIX_NUMERIC;
+        p->reason = "64-bit key radix";
+        return;
+    }
     /* Version, extension: scalar comparators until an exact transformed
-       form is proven. Size/time move to radix-numeric in 02E. */
+       form is proven. */
     p->sort_engine = LISZT_PLAN_SORT_SCALAR;
     p->reason = "comparator-only sort word";
 }
