@@ -1,6 +1,7 @@
 #ifndef LISZT_UTIL_H
 #define LISZT_UTIL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* Exit codes shared with GNU ls: 0 ok, 1 minor (e.g. unreadable
@@ -44,6 +45,11 @@ _Noreturn void liszt_try_help_and_die(void);
 void liszt_error(int errnum, const char *fmt, ...) LISZT_PRINTF(2, 3);
 _Noreturn void liszt_die(int status, int errnum, const char *fmt, ...)
     LISZT_PRINTF(3, 4);
+
+/* Exit-status accumulator (GNU set_exit_status): serious forces 2,
+   minor bumps 0 to 1, never downgrades. */
+void liszt_set_exit_status(bool serious);
+int liszt_exit_status(void);
 
 void *liszt_xmalloc(size_t n);
 void *liszt_xrealloc(void *p, size_t n);

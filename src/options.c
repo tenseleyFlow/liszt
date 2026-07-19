@@ -112,12 +112,21 @@ static const char *const format_words[] = {
 };
 enum { N_FORMAT_WORDS = sizeof format_words / sizeof format_words[0] };
 
+/* --sort words, GNU order (ls.c sort_args); "width" parses but stays
+   gated until sprint 04. */
+static const char *const sort_words[] = {
+    "none", "size", "time", "version", "extension", "name", "width"
+};
+enum { N_SORT_WORDS = sizeof sort_words / sizeof sort_words[0] };
+
 /* Parse-time staging, resolved after the loop (GNU's last-wins model). */
 struct staging {
     int format_opt;     /* -1 or enum liszt_format */
     int sort_opt;       /* -1 or enum liszt_sortword */
     enum liszt_ignore_mode ignore;
+    bool reverse;
     bool immediate_dirs;
+    bool explicit_time; /* -c/-u seen; feeds the sort-resolution rule */
 };
 
 static void
@@ -210,6 +219,37 @@ handle(int key, const char *value, const char *display, struct staging *st)
     case 'U':
         st->sort_opt = LISZT_SORT_NONE;
         break;
+    case 'S':
+        st->sort_opt = LISZT_SORT_SIZE;
+        break;
+    case 't':
+        st->sort_opt = LISZT_SORT_TIME;
+        break;
+    case 'v':
+        st->sort_opt = LISZT_SORT_VERSION;
+        break;
+    case 'X':
+        st->sort_opt = LISZT_SORT_EXTENSION;
+        break;
+    case 'r':
+        st->reverse = true;
+        break;
+    case 'f':
+        /* 9.11: -f is exactly -a -U, last-wins (it no longer disables
+           -l or color as ancient ls did). */
+        st->ignore = LISZT_IGNORE_MINIMAL;
+        st->sort_opt = LISZT_SORT_NONE;
+        break;
+    case KEY_SORT: {
+        static const int vals[] = {
+            LISZT_SORT_NONE, LISZT_SORT_SIZE, LISZT_SORT_TIME,
+            LISZT_SORT_VERSION, LISZT_SORT_EXTENSION, LISZT_SORT_NAME,
+            LISZT_SORT_WIDTH
+        };
+        st->sort_opt =
+            argmatch_die("--sort", value, sort_words, vals, N_SORT_WORDS);
+        break;
+    }
     case '1':
         if (st->format_opt != LISZT_FMT_LONG)
             st->format_opt = LISZT_FMT_ONE;
@@ -355,7 +395,9 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .format_opt = -1,
         .sort_opt = -1,
         .ignore = LISZT_IGNORE_DEFAULT,
-        .immediate_dirs = false
+        .reverse = false,
+        .immediate_dirs = false,
+        .explicit_time = false
     };
     bool posixly = getenv("POSIXLY_CORRECT") != NULL;
     bool no_more_options = false;
@@ -385,25 +427,38 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
             parse_shorts(arg, argc, argv, &i, &st);
     }
 
-    /* Resolution, mirroring decode_switches order. */
+    /* Resolution, mirroring decode_switches order. The sort-resolution
+       table is THE one place effective sort is computed; sprint 07's
+       -c/-u rule is the explicit_time input below, nothing else. */
     o->ignore = st.ignore;
+    o->reverse = st.reverse;
     o->immediate_dirs = st.immediate_dirs;
     o->format = st.format_opt >= 0
         ? (enum liszt_format)st.format_opt
         : (isatty(STDOUT_FILENO) ? LISZT_FMT_MANY : LISZT_FMT_ONE);
-    o->sort = st.sort_opt >= 0
-        ? (enum liszt_sortword)st.sort_opt
-        : LISZT_SORT_NAME;
+    if (st.sort_opt >= 0)
+        o->sort = (enum liszt_sortword)st.sort_opt;
+    else if (st.explicit_time && o->format != LISZT_FMT_LONG)
+        o->sort = LISZT_SORT_TIME;
+    else
+        o->sort = LISZT_SORT_NAME;
     o->deref = (o->immediate_dirs || o->format == LISZT_FMT_LONG)
         ? LISZT_DEREF_NEVER
         : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
 
-    /* Sprint 01 capability gate: clear exits, never wrong output. */
+    /* Capability gate: clear exits, never wrong output. Narrows as
+       sprints land. */
     if (o->format != LISZT_FMT_ONE)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
                   "only single-column output is supported yet"
                   " (use -1 or pipe stdout)");
-    if (o->sort != LISZT_SORT_NONE)
+    switch (o->sort) {
+    case LISZT_SORT_NONE:
+    case LISZT_SORT_NAME:
+    case LISZT_SORT_EXTENSION:
+        break;
+    default:
         liszt_die(LISZT_STATUS_SERIOUS, 0,
-                  "sorted listings are not supported yet (use -U)");
+                  "this sort is not supported yet");
+    }
 }

@@ -11,20 +11,9 @@
 #include "emit.h"
 #include "entry.h"
 #include "options.h"
+#include "plan.h"
+#include "sortkey.h"
 #include "util.h"
-
-/* Exit status accumulator: set_exit_status(serious) mirrors GNU ls -
-   serious forces 2, minor bumps 0 to 1, never downgrades. */
-static int exit_status = LISZT_STATUS_OK;
-
-static void
-set_exit_status(bool serious)
-{
-    if (serious)
-        exit_status = LISZT_STATUS_SERIOUS;
-    else if (exit_status == LISZT_STATUS_OK)
-        exit_status = LISZT_STATUS_MINOR;
-}
 
 static void
 file_failure(bool serious, const char *fmt_with_name, const char *name,
@@ -36,7 +25,7 @@ file_failure(bool serious, const char *fmt_with_name, const char *name,
     fprintf(stderr, "%s: ", liszt_prog);
     fprintf(stderr, fmt_with_name, name);
     fprintf(stderr, ": %s\n", strerror(errnum));
-    set_exit_status(serious);
+    liszt_set_exit_status(serious);
 }
 
 /* One classified command-line operand. */
@@ -44,6 +33,12 @@ struct operand {
     const char *name;
     bool is_dir;
 };
+
+static const char *
+operand_name(const void *p)
+{
+    return ((const struct operand *)p)->name;
+}
 
 /* GNU gobble_file's dereference chain for command-line operands under
    DEREF_COMMAND_LINE_SYMLINK_TO_DIR / _ARGUMENTS / NEVER, including the
@@ -127,6 +122,8 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
         return;
     }
 
+    liszt_sort_entries(es);
+
     if (print_dir_name) {
         if (!*first)
             liszt_emit_byte('\n');
@@ -148,6 +145,11 @@ main(int argc, char **argv)
 
     liszt_options_parse(argc, argv, &o);
 
+    struct liszt_plan plan;
+    liszt_plan_select(&o, &plan);
+    liszt_plan_debug_print(&plan);
+    liszt_sort_init(&o, &plan);
+
     /* Classify operands in argv order; failures diagnose and discard
        (GNU gobble_file returning 0 for command-line args). The implicit
        "." goes straight to the directory queue without classification,
@@ -162,6 +164,11 @@ main(int argc, char **argv)
             if (classify_operand(o.operands[i], &o, &ops[n_ops]))
                 n_ops++;
     }
+
+    /* GNU sorts the whole command-line batch (files and dirs together),
+       then extracts dirs preserving that order. */
+    if (o.sort != LISZT_SORT_NONE && n_ops > 1)
+        liszt_sort_operands(ops, (size_t)n_ops, sizeof *ops, operand_name);
 
     int n_files = 0;
     int n_dirs = implicit_dot ? 1 : 0;
@@ -209,5 +216,5 @@ main(int argc, char **argv)
         liszt_error(werr, "write error");
         return LISZT_STATUS_SERIOUS;
     }
-    return exit_status;
+    return liszt_exit_status();
 }

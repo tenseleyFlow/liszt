@@ -85,6 +85,23 @@ liszt_die(int status, int errnum, const char *fmt, ...)
     exit(status);
 }
 
+static int exit_status = LISZT_STATUS_OK;
+
+void
+liszt_set_exit_status(bool serious)
+{
+    if (serious)
+        exit_status = LISZT_STATUS_SERIOUS;
+    else if (exit_status == LISZT_STATUS_OK)
+        exit_status = LISZT_STATUS_MINOR;
+}
+
+int
+liszt_exit_status(void)
+{
+    return exit_status;
+}
+
 void *
 liszt_xmalloc(size_t n)
 {
