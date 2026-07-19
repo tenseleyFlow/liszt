@@ -203,6 +203,37 @@ run_case_tables() {
     run_case_pin911 "$@"
 }
 
+# run_case_ext SLUG SPRINT desc locale wantrc -- args...
+# Extension tier (v0.2+): liszt-only, byte-compared against pinned
+# expected output under tests/golden/extensions/ - no oracle exists
+# beyond the GNU surface. stderr must match <slug>.err when that file
+# exists and be empty otherwise; exit code asserted always.
+run_case_ext() {
+    slug="$1" tag="$2" desc="$3" lc="$4" wantrc="$5"
+    shift 5
+    [ "$1" = "--" ] && shift
+    [ "$tag" -le "$active" ] || return 0
+    cases=$((cases + 1))
+    exp="tests/golden/extensions/$slug.out"
+    experr="tests/golden/extensions/$slug.err"
+    run_pinned "$lc" "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
+    urc=$?
+    normprog < "$work/u.raw" > "$work/u.err"
+    ok=1
+    [ "$urc" -eq "$wantrc" ] || ok=0
+    cmp -s "$work/u.out" "$exp" || ok=0
+    if [ -f "$experr" ]; then
+        cmp -s "$work/u.err" "$experr" || ok=0
+    else
+        [ -s "$work/u.err" ] && ok=0
+    fi
+    if [ "$ok" -ne 1 ]; then
+        echo "EXT CASE FAIL [$desc] (lc=$lc rc=$urc want=$wantrc)" >&2
+        diff -u "$exp" "$work/u.out" 2>/dev/null | sed -n '1,12p' >&2
+        fails=$((fails + 1))
+    fi
+}
+
 # run_case SPRINT name locale wantrc -- flags/operands...
 # Compares stdout byte-exact, stderr after normprog, and exit codes between
 # liszt.uut and the oracle. wantrc '-' skips the explicit rc assertion (the
@@ -881,6 +912,13 @@ run_case 8 "author long" C 0 -- -l --author "$work/zdir"
 run_case 8 "author with context" C 0 -- -lZa --author "$work/zdir"
 run_case 8 "author short ignored" C 0 -- -1 --author "$work/zdir"
 run_case_pin911 8 "hyperlink missing operand" C 2 -- --hyperlink=always "$work/zz-nope" "$work/zdir/a"
+
+# Extension-tier smoke: a deterministic fixture proves the tier's
+# plumbing before any extension feature exists.
+mkdir -p "$work/extsmoke"
+printf 'x\n' > "$work/extsmoke/alpha"
+printf 'x\n' > "$work/extsmoke/beta"
+run_case_ext ext-smoke 11 "extension tier smoke" C 0 -- -1 "$work/extsmoke"
 
 # 11: extension-table invisibility guards. The ext_longopts exact-match
 # layer must never perturb GNU-surface parsing: abbreviation matching,

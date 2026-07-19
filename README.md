@@ -98,6 +98,13 @@ printability is libc `iswprint` everywhere, matching `c32isprint`'s
 dispatch. Birth times use `statx` with GNU's `?` fallback where the
 filesystem has none.
 
+## Extensions
+
+An extensions era is in progress (v0.2): Nerd-Font icons, `--tree`,
+and a dependency-free `--git` status column, all off by default -
+plain liszt remains byte-identical to GNU ls. Extension flags use
+eza-compatible names and match by exact spelling only.
+
 ## Debug surface
 
 `LISZT_DEBUG_PLAN` (selected engines), `LISZT_DEBUG_STATS` (radix and
