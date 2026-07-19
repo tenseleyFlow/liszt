@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 /* Exit codes shared with GNU ls: 0 ok, 1 minor (e.g. unreadable
    subdirectory), 2 serious (bad option, inaccessible operand). */
@@ -60,5 +61,11 @@ int liszt_exit_status(void);
 
 void *liszt_xmalloc(size_t n);
 void *liszt_xrealloc(void *p, size_t n);
+char *liszt_xstrdup(const char *s);
+
+/* strmode/filemodestring port (gnulib filemode): writes 12 bytes - the
+   type letter, nine permission bits with s/S t/T, index 10 = ' ' (the
+   POSIX alternate-access slot the -l renderer overwrites), NUL. */
+void liszt_filemodestring(mode_t mode, char str[12]);
 
 #endif

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 const char *liszt_prog = "liszt";
 const char *liszt_argv0 = "liszt";
@@ -175,4 +176,56 @@ liszt_xrealloc(void *p, size_t n)
     if (!q)
         liszt_die(LISZT_STATUS_SERIOUS, errno, "memory exhausted");
     return q;
+}
+
+char *
+liszt_xstrdup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *p = liszt_xmalloc(n);
+    memcpy(p, s, n);
+    return p;
+}
+
+static char
+ftypelet(mode_t bits)
+{
+    if (S_ISREG(bits))
+        return '-';
+    if (S_ISDIR(bits))
+        return 'd';
+    if (S_ISBLK(bits))
+        return 'b';
+    if (S_ISCHR(bits))
+        return 'c';
+    if (S_ISLNK(bits))
+        return 'l';
+    if (S_ISFIFO(bits))
+        return 'p';
+    if (S_ISSOCK(bits))
+        return 's';
+    return '?';
+}
+
+void
+liszt_filemodestring(mode_t mode, char str[12])
+{
+    str[0] = ftypelet(mode);
+    str[1] = mode & S_IRUSR ? 'r' : '-';
+    str[2] = mode & S_IWUSR ? 'w' : '-';
+    str[3] = mode & S_ISUID
+        ? (mode & S_IXUSR ? 's' : 'S')
+        : (mode & S_IXUSR ? 'x' : '-');
+    str[4] = mode & S_IRGRP ? 'r' : '-';
+    str[5] = mode & S_IWGRP ? 'w' : '-';
+    str[6] = mode & S_ISGID
+        ? (mode & S_IXGRP ? 's' : 'S')
+        : (mode & S_IXGRP ? 'x' : '-');
+    str[7] = mode & S_IROTH ? 'r' : '-';
+    str[8] = mode & S_IWOTH ? 'w' : '-';
+    str[9] = mode & S_ISVTX
+        ? (mode & S_IXOTH ? 't' : 'T')
+        : (mode & S_IXOTH ? 'x' : '-');
+    str[10] = ' ';
+    str[11] = '\0';
 }

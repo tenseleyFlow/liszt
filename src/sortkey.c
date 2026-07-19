@@ -332,10 +332,10 @@ make_item(const struct liszt_entry *e, struct liszt_item *out)
     const struct liszt_entrymeta *m =
         cur_es->meta ? &cur_es->meta[e->meta_idx] : NULL;
     out->name = liszt_entry_name(cur_es, e);
-    out->size = m ? m->size : 0;
-    out->mtime = m ? m->mtime : (struct timespec){ 0, 0 };
+    out->size = m ? m->st.size : 0;
+    out->mtime = m ? m->st.mtime : (struct timespec){ 0, 0 };
     out->group_dir = e->ftype == LISZT_T_DIR
-        || (m && (S_ISDIR(m->mode) || S_ISDIR(m->linkmode)));
+        || (m && (S_ISDIR(m->st.mode) || S_ISDIR(m->linkmode)));
 }
 
 static int
@@ -872,11 +872,11 @@ numeric_sort_range(struct liszt_entries *es, struct liszt_entry *eaux,
         const struct liszt_entrymeta *m = &es->meta[e->meta_idx];
         recs[i].e = *e;
         if (S.word == LISZT_SORT_SIZE) {
-            recs[i].k1 = ~bias64((int64_t)m->size);
+            recs[i].k1 = ~bias64((int64_t)m->st.size);
             recs[i].k2 = 0;
         } else {
-            recs[i].k1 = ~bias64((int64_t)m->mtime.tv_sec);
-            recs[i].k2 = ~(uint32_t)m->mtime.tv_nsec;
+            recs[i].k1 = ~bias64((int64_t)m->st.mtime.tv_sec);
+            recs[i].k2 = ~(uint32_t)m->st.mtime.tv_nsec;
         }
     }
     nrec_radix(recs, aux, 0, n, 0);

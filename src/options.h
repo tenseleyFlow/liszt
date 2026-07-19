@@ -2,6 +2,7 @@
 #define LISZT_OPTIONS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "dirread.h"
 
@@ -40,6 +41,20 @@ struct liszt_options {
     bool reverse;
     bool group_directories_first;
     bool immediate_dirs;
+    /* Long-format field selection. */
+    bool print_owner;
+    bool print_group;
+    bool print_author;
+    bool numeric_ids;
+    /* Columns valid in every format. */
+    bool print_block_size;      /* -s */
+    bool print_inode;           /* -i */
+    /* Block-size family: (opts, size) pairs for block counts (totals,
+       -s) and for -l file sizes, resolved per GNU's env chain. */
+    int human_output_opts;
+    uintmax_t output_block_size;
+    int file_human_output_opts;
+    uintmax_t file_output_block_size;
     char **operands;    /* argv-order pointers into argv; xmalloc'd array */
     int n_operands;
 };

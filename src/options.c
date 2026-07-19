@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "human.h"
 #include "util.h"
 
 /* Hand-rolled parser producing byte-identical diagnostics to GNU ls's
@@ -128,6 +129,17 @@ struct staging {
     bool group_directories_first;
     bool immediate_dirs;
     bool explicit_time; /* -c/-u seen; feeds the sort-resolution rule */
+    bool print_owner;
+    bool print_group;
+    bool print_author;
+    bool numeric_ids;
+    bool print_block_size;
+    bool print_inode;
+    bool kibibytes_specified;
+    int human_output_opts;
+    uintmax_t output_block_size;    /* 0 = unset, resolve from env */
+    int file_human_output_opts;
+    uintmax_t file_output_block_size;
 };
 
 static void
@@ -235,6 +247,62 @@ handle(int key, const char *value, const char *display, struct staging *st)
     case 'r':
         st->reverse = true;
         break;
+    case 'l':
+        st->format_opt = LISZT_FMT_LONG;
+        break;
+    case 'g':
+        st->format_opt = LISZT_FMT_LONG;
+        st->print_owner = false;
+        break;
+    case 'o':
+        st->format_opt = LISZT_FMT_LONG;
+        st->print_group = false;
+        break;
+    case 'n':
+        st->numeric_ids = true;
+        st->format_opt = LISZT_FMT_LONG;
+        break;
+    case 'G':
+        st->print_group = false;
+        break;
+    case KEY_AUTHOR:
+        st->print_author = true;
+        break;
+    case 's':
+        st->print_block_size = true;
+        break;
+    case 'i':
+        st->print_inode = true;
+        break;
+    case 'h':
+        st->file_human_output_opts = st->human_output_opts =
+            LISZT_HUMAN_AUTOSCALE | LISZT_HUMAN_SI | LISZT_HUMAN_BASE_1024;
+        st->file_output_block_size = st->output_block_size = 1;
+        break;
+    case KEY_SI:
+        st->file_human_output_opts = st->human_output_opts =
+            LISZT_HUMAN_AUTOSCALE | LISZT_HUMAN_SI;
+        st->file_output_block_size = st->output_block_size = 1;
+        break;
+    case 'k':
+        st->kibibytes_specified = true;
+        break;
+    case KEY_BLOCK_SIZE: {
+        enum liszt_strtol_error e =
+            liszt_human_options(value, &st->human_output_opts,
+                                &st->output_block_size);
+        if (e != LISZT_LONGINT_OK) {
+            /* GNU xstrtol_fatal shape: no Try line, exit 2. */
+            liszt_error(0, "%s --block-size argument %s%s%s%s",
+                        e == LISZT_LONGINT_OVERFLOW ? "" : "invalid",
+                        liszt_qL(), liszt_quote_diag(value), liszt_qR(),
+                        e == LISZT_LONGINT_OVERFLOW ? " too large" : "");
+            exit(LISZT_STATUS_SERIOUS);
+        }
+        st->file_human_output_opts = st->human_output_opts;
+        st->file_output_block_size = st->output_block_size;
+        break;
+    }
     case 'f':
         /* 9.11: -f is exactly -a -U, last-wins (it no longer disables
            -l or color as ancient ls did). */
@@ -402,7 +470,18 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .reverse = false,
         .group_directories_first = false,
         .immediate_dirs = false,
-        .explicit_time = false
+        .explicit_time = false,
+        .print_owner = true,
+        .print_group = true,
+        .print_author = false,
+        .numeric_ids = false,
+        .print_block_size = false,
+        .print_inode = false,
+        .kibibytes_specified = false,
+        .human_output_opts = 0,
+        .output_block_size = 0,
+        .file_human_output_opts = 0,
+        .file_output_block_size = 0
     };
     bool posixly = getenv("POSIXLY_CORRECT") != NULL;
     bool no_more_options = false;
@@ -439,6 +518,39 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     o->reverse = st.reverse;
     o->group_directories_first = st.group_directories_first;
     o->immediate_dirs = st.immediate_dirs;
+    o->print_owner = st.print_owner;
+    o->print_group = st.print_group;
+    o->print_author = st.print_author;
+    o->numeric_ids = st.numeric_ids;
+    o->print_block_size = st.print_block_size;
+    o->print_inode = st.print_inode;
+
+    /* GNU's BLOCK_SIZE env chain (decode_switches 2249-2264): flags win;
+       else LS_BLOCK_SIZE (falling through to BLOCK_SIZE/BLOCKSIZE inside
+       the parser); env values also bind the -l file pair; -k then forces
+       1024 block counts, leaving file sizes alone. Env errors are
+       silently ignored. */
+    if (st.output_block_size == 0) {
+        const char *ls_bs = getenv("LS_BLOCK_SIZE");
+        liszt_human_options(ls_bs, &st.human_output_opts,
+                            &st.output_block_size);
+        if (ls_bs || getenv("BLOCK_SIZE")) {
+            st.file_human_output_opts = st.human_output_opts;
+            st.file_output_block_size = st.output_block_size;
+        }
+        if (st.kibibytes_specified) {
+            st.human_output_opts = 0;
+            st.output_block_size = 1024;
+        }
+    }
+    if (st.file_output_block_size == 0) {
+        st.file_human_output_opts = 0;
+        st.file_output_block_size = 1;
+    }
+    o->human_output_opts = st.human_output_opts;
+    o->output_block_size = st.output_block_size;
+    o->file_human_output_opts = st.file_human_output_opts;
+    o->file_output_block_size = st.file_output_block_size;
     o->format = st.format_opt >= 0
         ? (enum liszt_format)st.format_opt
         : (isatty(STDOUT_FILENO) ? LISZT_FMT_MANY : LISZT_FMT_ONE);
@@ -454,10 +566,10 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
 
     /* Capability gate: clear exits, never wrong output. Narrows as
        sprints land. */
-    if (o->format != LISZT_FMT_ONE)
+    if (o->format != LISZT_FMT_ONE && o->format != LISZT_FMT_LONG)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
-                  "only single-column output is supported yet"
-                  " (use -1 or pipe stdout)");
+                  "only single-column and long output are supported yet"
+                  " (use -1, -l, or pipe stdout)");
     switch (o->sort) {
     case LISZT_SORT_NONE:
     case LISZT_SORT_NAME:

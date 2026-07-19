@@ -14,6 +14,7 @@ SRC = \
 	src/dirread.c \
 	src/entry.c \
 	src/sortkey.c \
+	src/human.c \
 	src/idcache.c \
 	src/timefmt.c \
 	src/colors.c \

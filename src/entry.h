@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "sys/dir.h"
+#include "sys/xstat.h"
 
 /* Compact per-entry record. Names live in the arena, NUL-terminated so a
    span doubles as a C string for syscalls, but name_len is authoritative:
@@ -22,14 +23,14 @@ struct liszt_entry {
 };
 
 /* Lazily allocated per-entry metadata (the plan decides whether it is
-   fetched at all). Sprint 02: sort keys and grouping; sprint 03 widens
-   it for -l. */
+   fetched at all). */
 struct liszt_entrymeta {
-    off_t size;
-    struct timespec mtime;
-    mode_t mode;
-    mode_t linkmode;    /* symlink target mode when grouping needs it */
+    struct liszt_statinfo st;
+    mode_t linkmode;        /* symlink target mode (grouping, -l ind.) */
+    uint32_t link_off;      /* readlink target in the arena; UINT32_MAX
+                               = none/unread */
     unsigned char stat_ok;
+    unsigned char acl;      /* 0 none, 1 context-only '.', 2 acl '+' */
 };
 
 /* Per-directory entry list: one byte arena plus a record array, both
@@ -51,8 +52,14 @@ void liszt_entries_free(struct liszt_entries *es);
 void liszt_entries_add(struct liszt_entries *es, const char *name,
                        size_t len, enum liszt_ftype type);
 
-/* Allocate (zeroed) meta slots for the current entries. */
+/* Allocate (zeroed) meta slots for the current entries; link_off slots
+   start at UINT32_MAX. */
 void liszt_entries_ensure_meta(struct liszt_entries *es);
+
+/* Append LEN bytes plus a NUL to the arena, returning the offset
+   (symlink targets ride the same arena as names). */
+uint32_t liszt_entries_add_bytes(struct liszt_entries *es, const char *p,
+                                 size_t len);
 
 static inline const char *
 liszt_entry_name(const struct liszt_entries *es, const struct liszt_entry *e)

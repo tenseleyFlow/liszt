@@ -19,6 +19,12 @@ enum liszt_sort_plan {
 struct liszt_plan {
     enum liszt_sort_plan sort_engine;
     const char *reason;
+    /* The per-entry fetch set (GNU calc_req_mask semantics plus liszt's
+       explicit BLOCKS request for the total line). */
+    bool needs_stat;
+    unsigned stat_wants;        /* LISZT_WANT_* */
+    bool needs_link_target;     /* readlink for -l symlinks */
+    bool needs_xattr;           /* ACL/context mode suffix */
 };
 
 void liszt_plan_select(const struct liszt_options *o, struct liszt_plan *p);
