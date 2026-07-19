@@ -872,6 +872,7 @@ run_case 8 "context dired" C 0 -- -DZ "$work/zdir"
 run_case 8 "author long" C 0 -- -l --author "$work/zdir"
 run_case 8 "author with context" C 0 -- -lZa --author "$work/zdir"
 run_case 8 "author short ignored" C 0 -- -1 --author "$work/zdir"
+run_case 8 "hyperlink missing operand" C 2 -- --hyperlink=always "$work/zz-nope" "$work/zdir/a"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus

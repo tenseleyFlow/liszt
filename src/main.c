@@ -871,6 +871,7 @@ classify_operand(const char *name, const struct liszt_options *o,
 
     if (err != 0) {
         file_failure(true, "cannot access %s", name, errno);
+        free(out->absolute_name);   /* allocated before the stat, GNU order */
         return false;
     }
     out->name = name;
@@ -1546,6 +1547,8 @@ main(int argc, char **argv)
     for (int i = 0; i < n_ops; i++) {
         free(ops[i].linkname);
         free(ops[i].qname);
+        free(ops[i].absolute_name);
+        free(ops[i].scontext);
     }
     free(ops);
     free(o.operands);

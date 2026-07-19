@@ -336,12 +336,9 @@ print_help(void)
     printf("List information about the FILEs (the current directory by default).\n");
     printf("\n");
     printf("liszt is a from-scratch reimplementation of GNU ls; 'lz' is the same\n");
-    printf("binary under a shorter name.\n");
-    printf("\n");
-    printf("Implemented so far: -1 -U -a -A --all --almost-all\n");
-    printf("--format=single-column --help --version. Other GNU ls options are\n");
-    printf("recognized but exit with a not-supported diagnostic until their\n");
-    printf("sprint lands.\n");
+    printf("binary under a shorter name. The full GNU ls 9.11 option surface is\n");
+    printf("supported with byte-identical output under a pinned environment;\n");
+    printf("see ls(1) for option semantics.\n");
     exit(LISZT_STATUS_OK);
 }
 
