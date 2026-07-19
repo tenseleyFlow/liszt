@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <langinfo.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -114,12 +115,20 @@ enum { N_LONGOPTS = sizeof longopts / sizeof longopts[0] };
    No abbreviation for extension names, by design. Keys from 512. */
 enum {
     KEY_EXT_BASE = 512,
-    KEY_ICONS = KEY_EXT_BASE
+    KEY_ICONS = KEY_EXT_BASE,
+    KEY_TREE,
+    KEY_LEVEL,
+    KEY_TREE_LIMIT,
+    KEY_TREE_GLYPHS
 };
 
 static const struct longopt ext_longopts[] = {
     {"icons", ARG_OPT, KEY_ICONS},
-    /* Rows land with their sprints (13: tree; 14: git). */
+    {"tree", ARG_NO, KEY_TREE},
+    {"level", ARG_REQ, KEY_LEVEL},
+    {"tree-limit", ARG_REQ, KEY_TREE_LIMIT},
+    {"tree-glyphs", ARG_REQ, KEY_TREE_GLYPHS},
+    /* Rows land with their sprints (14: git). */
     {NULL, ARG_NO, 0},
 };
 enum { N_EXT_LONGOPTS = sizeof ext_longopts / sizeof ext_longopts[0] - 1 };
@@ -191,6 +200,10 @@ struct staging {
     bool dired;                     /* -D seen */
     bool print_hyperlink;           /* resolved WHEN, positional */
     int print_icons_opt;            /* -1 unset, 0 off, 1 on */
+    bool tree;                      /* --tree structural mode */
+    long tree_level;                /* -1 unset; 0 = unlimited */
+    long tree_limit;                /* -1 unset; 0 = uncapped */
+    int tree_glyphs;                /* -1 auto, 0 ascii, 1 unicode */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -462,6 +475,34 @@ handle(int key, const char *value, const char *display, struct staging *st)
         st->print_icons_opt = 0;
         st->dired = true;
         break;
+    case KEY_TREE:
+        st->tree = true;
+        break;
+    case KEY_LEVEL:
+    case KEY_TREE_LIMIT: {
+        char *end;
+        errno = 0;
+        long v = strtol(value, &end, 10);
+        if (end == value || *end != '\0' || errno == ERANGE || v < 0) {
+            fprintf(stderr, "%s: invalid %s argument '%s'\n",
+                    liszt_argv0, display, value);
+            liszt_try_help_and_die();
+        }
+        if (key == KEY_LEVEL)
+            st->tree_level = v;
+        else
+            st->tree_limit = v;
+        break;
+    }
+    case KEY_TREE_GLYPHS: {
+        static const char *const glyph_words[] = {
+            "unicode", "ascii", "auto"
+        };
+        static const int glyph_vals[] = { 1, 0, -1 };
+        st->tree_glyphs = argmatch_die("--tree-glyphs", value,
+                                       glyph_words, glyph_vals, 3);
+        break;
+    }
     case KEY_ICONS: {
         /* eza semantics: bare --icons means auto (TTY-gated), a
            deliberate documented divergence from the GNU bare-WHEN
@@ -855,6 +896,10 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .dired = false,
         .print_hyperlink = false,
         .print_icons_opt = -1,
+        .tree = false,
+        .tree_level = -1,
+        .tree_limit = -1,
+        .tree_glyphs = -1,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -958,8 +1003,32 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
             || (v == WHEN_IF_TTY && isatty(STDOUT_FILENO));
     }
     o->print_icons = st.print_icons_opt == 1;
+    /* --tree resolution (locked, sprint 13): implies recursion-like
+       traversal via its own walker; forces one-per-line unless long;
+       -d wins by leaving dir operands unextracted; the child flags
+       demand --tree. Glyph auto = UTF-8 codeset. */
+    if (!st.tree
+        && (st.tree_level >= 0 || st.tree_limit >= 0
+            || st.tree_glyphs != -1)) {
+        const char *culprit = st.tree_level >= 0 ? "--level"
+            : st.tree_limit >= 0 ? "--tree-limit" : "--tree-glyphs";
+        fprintf(stderr, "%s: %s requires --tree\n", liszt_argv0,
+                culprit);
+        liszt_try_help_and_die();
+    }
+    o->tree = st.tree;
+    o->tree_level = st.tree_level > 0 ? (size_t)st.tree_level : 0;
+    o->tree_limit = st.tree_limit > 0 ? (size_t)st.tree_limit : 0;
+    if (st.tree_glyphs == -1) {
+        const char *cs = nl_langinfo(CODESET);
+        o->tree_unicode = cs != NULL && strcmp(cs, "UTF-8") == 0;
+    } else {
+        o->tree_unicode = st.tree_glyphs == 1;
+    }
+    if (o->tree && o->format != LISZT_FMT_LONG)
+        o->format = LISZT_FMT_ONE;
     o->dired = st.dired && o->format == LISZT_FMT_LONG
-        && !o->print_hyperlink && !o->print_icons;
+        && !o->print_hyperlink && !o->print_icons && !o->tree;
     if (o->eolbyte == 0 && o->dired)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
                   "--dired and --zero are incompatible");

@@ -84,6 +84,10 @@ struct liszt_options {
     bool print_with_color;
     bool print_hyperlink;
     bool print_icons;           /* --icons extension (v0.2) */
+    bool tree;                  /* --tree structural mode (v0.2) */
+    size_t tree_level;          /* 0 = unlimited */
+    size_t tree_limit;          /* 0 = uncapped */
+    bool tree_unicode;          /* branch glyph charset */
     enum liszt_indicator_style indicator_style;
     bool qmark_funny_chars;
     bool align_variable_outer_quotes;
