@@ -263,7 +263,8 @@ EOF
     fi
     set +f
 
-    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+    env -i ${LISZT_PARALLEL_MIN:+LISZT_PARALLEL_MIN=$LISZT_PARALLEL_MIN} \
+        PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
         LS_COLORS="$FUZZ_LSC" LISZT_DEBUG_VERIFY=1 \
         "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
     urc=$?

@@ -79,6 +79,16 @@ sanitize:
 	$(MAKE) clean
 	$(MAKE) all
 
+# ThreadSanitizer over the parallel stat phase: goldens exercise it via
+# LISZT_PARALLEL_MIN=1 in the harness env when set here.
+tsan:
+	$(MAKE) clean
+	$(MAKE) all CFLAGS='$(CFLAGS) -fsanitize=thread' LDFLAGS='$(LDFLAGS) -fsanitize=thread'
+	LISZT_PARALLEL_MIN=1 sh tests/golden/run.sh
+	FUZZ_TRIALS=10 LISZT_PARALLEL_MIN=1 sh tests/fuzz/run.sh || test $$? -eq 77
+	$(MAKE) clean
+	$(MAKE) all
+
 dist:
 	git archive --format=tar.gz --prefix=liszt-$(VERSION)/ \
 		-o liszt-$(VERSION).tar.gz HEAD

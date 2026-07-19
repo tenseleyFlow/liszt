@@ -41,6 +41,8 @@ struct liszt_entrymeta {
     unsigned char quoted;   /* outer quotes/escapes changed the name */
     unsigned char padded;   /* leading align space at emit */
     unsigned char stat_ok;
+    unsigned char stat_tried;   /* parallel phase ran statx for this slot */
+    int stat_errno;             /* errno when stat_tried && !stat_ok */
     unsigned char acl;      /* 0 none, 1 context-only '.', 2 acl '+' */
     unsigned char linkok;   /* symlink target exists */
     unsigned char has_capability;

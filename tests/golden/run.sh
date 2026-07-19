@@ -108,7 +108,8 @@ run_pinned() {
     # LANGUAGE=C pins gettext away: an oracle with installed message
     # catalogs (brew gls) would otherwise translate LC_TIME format
     # strings and diagnostics that liszt never translates.
-    env -i $EXTRA_ENV PATH="$PATH" LANGUAGE=C LC_ALL="$lc" TZ=UTC0 \
+    env -i $EXTRA_ENV ${LISZT_PARALLEL_MIN:+LISZT_PARALLEL_MIN=$LISZT_PARALLEL_MIN} \
+        PATH="$PATH" LANGUAGE=C LC_ALL="$lc" TZ=UTC0 \
         COLUMNS=80 LS_COLORS= LISZT_DEBUG_VERIFY=1 "$@"
 }
 EXTRA_ENV=

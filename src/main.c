@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef __linux__
 #include <sys/sysmacros.h>
@@ -24,6 +25,7 @@
 #include "plan.h"
 #include "quote.h"
 #include "sortkey.h"
+#include "sys/thread.h"
 #include "sys/xstat.h"
 #include "timefmt.h"
 #include "util.h"
@@ -849,6 +851,64 @@ fetch_scontext(const char *dir, const char *name, bool follow)
     return NULL;
 }
 
+/* --- parallel stat phase (09D) ---------------------------------------
+
+   Determinism argument: each task touches only its own entry's meta
+   slot and ftype byte (disjoint pre-assigned slots), reads the entry
+   arena immutably (no appends until the serial pass), and never emits
+   bytes or diagnostics. The ordered serial pass afterwards replays
+   failure diagnostics from recorded errnos and performs all
+   arena-appending work, so output and stderr are byte-identical to the
+   serial path by construction. Path joining is safe because xstat's
+   join buffer is thread-local. */
+
+struct meta_par_ctx {
+    const char *dirname;
+    const struct liszt_options *o;
+    struct liszt_entries *es;
+    bool group;
+};
+
+static void
+meta_par_task(void *vctx, size_t i)
+{
+    struct meta_par_ctx *ctx = vctx;
+    struct liszt_entries *es = ctx->es;
+    struct liszt_entry *e = &es->v[i];
+    struct liszt_entrymeta *m = &es->meta[e->meta_idx];
+    const char *nm = liszt_entry_name(es, e);
+    enum liszt_ftype t = e->ftype;
+
+    bool check_stat = plan.needs_stat
+        || (ctx->group && t == LISZT_T_UNKNOWN)
+        || ((t == LISZT_T_DIR || t == LISZT_T_UNKNOWN)
+            && plan.stat_dirs_for_color)
+        || ((t == LISZT_T_LNK || t == LISZT_T_UNKNOWN)
+            && plan.stat_links)
+        || ((t == LISZT_T_REG || t == LISZT_T_UNKNOWN)
+            && plan.stat_exec);
+
+    if (check_stat) {
+        bool follow = ctx->o->deref == LISZT_DEREF_ALWAYS;
+        m->stat_tried = 1;
+        if (liszt_statx_join(ctx->dirname, nm,
+                             plan.stat_wants | LISZT_WANT_MODE,
+                             follow, &m->st) == 0) {
+            m->stat_ok = 1;
+            e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
+        } else {
+            m->stat_errno = errno;
+            return;     /* serial pass diagnoses and skips, in order */
+        }
+    }
+    if (plan.cap_probe
+        && (e->ftype == LISZT_T_REG || e->ftype == LISZT_T_UNKNOWN))
+        m->has_capability =
+            liszt_xattr_list_has(ctx->dirname, nm, "security.capability");
+    if (plan.needs_xattr)
+        m->acl = probe_acl(ctx->dirname, nm, e->ftype == LISZT_T_DIR);
+}
+
 /* GNU gobble_file's dereference chain for command-line operands,
    including the successful-stat-then-lstat fall-through. */
 static bool
@@ -1016,6 +1076,34 @@ fill_meta(const char *dirname, const struct liszt_options *o,
         return;
     liszt_entries_ensure_meta(es);
 
+    /* Parallel phase: syscall-bound per-entry work (statx, xattr
+       probes) farmed across the pool; everything ordered or
+       arena-appending stays in the serial pass below. */
+    bool par = false;
+    bool par_work = plan.needs_stat || group || plan.stat_dirs_for_color
+        || plan.stat_exec || plan.stat_links || plan.needs_xattr
+        || plan.cap_probe;
+    if (par_work) {
+        static long par_min = -1;
+        if (par_min < 0) {
+            const char *pm = getenv("LISZT_PARALLEL_MIN");
+            par_min = pm ? atol(pm) : 400;
+            if (par_min < 1)
+                par_min = 1;
+        }
+        if (es->len >= (size_t)par_min) {
+            long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+            size_t workers = es->len / 256 + 1;
+            if (ncpu > 0 && workers > (size_t)ncpu)
+                workers = (size_t)ncpu;
+            if (workers > 1) {
+                struct meta_par_ctx ctx = { dirname, o, es, group };
+                liszt_run_tasks(meta_par_task, &ctx, es->len, workers);
+                par = true;
+            }
+        }
+    }
+
     for (size_t i = 0; i < es->len; i++) {
         struct liszt_entry *e = &es->v[i];
         struct liszt_entrymeta *m = &es->meta[e->meta_idx];
@@ -1046,19 +1134,30 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 && plan.stat_exec);
 
         if (check_stat) {
-            bool follow = o->deref == LISZT_DEREF_ALWAYS;
-            /* Any stat implies MODE: conditional fetches (symlink
-               resolution under -L/-R, exec bits, dir color bits) exist
-               to read it, and the ftype re-derivation depends on it. */
-            if (liszt_statx_join(dirname, nm,
-                                 plan.stat_wants | LISZT_WANT_MODE,
-                                 follow, &m->st) == 0) {
-                m->stat_ok = 1;
-                e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
+            if (par && m->stat_tried) {
+                if (!m->stat_ok) {
+                    file_failure(false, "cannot access %s",
+                                 liszt_join_path(dirname, nm),
+                                 m->stat_errno);
+                    continue;
+                }
+                /* worker already re-derived ftype */
             } else {
-                file_failure(false, "cannot access %s",
-                             liszt_join_path(dirname, nm), errno);
-                continue;
+                bool follow = o->deref == LISZT_DEREF_ALWAYS;
+                /* Any stat implies MODE: conditional fetches (symlink
+                   resolution under -L/-R, exec bits, dir color bits)
+                   exist to read it, and the ftype re-derivation
+                   depends on it. */
+                if (liszt_statx_join(dirname, nm,
+                                     plan.stat_wants | LISZT_WANT_MODE,
+                                     follow, &m->st) == 0) {
+                    m->stat_ok = 1;
+                    e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
+                } else {
+                    file_failure(false, "cannot access %s",
+                                 liszt_join_path(dirname, nm), errno);
+                    continue;
+                }
             }
         }
         if (e->ftype == LISZT_T_LNK
@@ -1084,11 +1183,11 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 }
             }
         }
-        if (plan.cap_probe
+        if (!par && plan.cap_probe
             && (e->ftype == LISZT_T_REG || e->ftype == LISZT_T_UNKNOWN))
             m->has_capability =
                 liszt_xattr_list_has(dirname, nm, "security.capability");
-        if (plan.needs_xattr)
+        if (!par && plan.needs_xattr)
             m->acl = probe_acl(dirname, nm, e->ftype == LISZT_T_DIR);
         if (o->print_scontext) {
             char *sc = fetch_scontext(dirname, nm,

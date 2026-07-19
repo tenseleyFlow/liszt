@@ -20,8 +20,10 @@
 #include <sys/xattr.h>
 #endif
 
-static char *pathbuf;
-static size_t pathbuf_cap;
+/* Thread-local: the parallel stat phase joins paths concurrently; each
+   worker owns a buffer. Serial callers see one buffer as before. */
+static _Thread_local char *pathbuf;
+static _Thread_local size_t pathbuf_cap;
 
 /* Which timestamp .time carries, set once before any stat (GNU's
    global time_type consulted by calc_req_mask and do_statx). */
