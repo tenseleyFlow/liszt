@@ -1,24 +1,44 @@
 #include "dirread.h"
 
 #include <errno.h>
+#include <fnmatch.h>
 
 static int
-ignored(enum liszt_ignore_mode mode, const char *name, size_t len)
+patterns_match(char *const *pats, int n, const char *name)
 {
-    switch (mode) {
+    for (int i = 0; i < n; i++)
+        if (fnmatch(pats[i], name, FNM_PERIOD) == 0)
+            return 1;
+    return 0;
+}
+
+/* GNU file_ignored: mode dots, then --hide (default mode only), then
+   -I/-B unconditionally. */
+static int
+ignored(const struct liszt_ignore_spec *spec, const char *name, size_t len)
+{
+    switch (spec->mode) {
     case LISZT_IGNORE_DEFAULT:
-        return len > 0 && name[0] == '.';
+        if (len > 0 && name[0] == '.')
+            return 1;
+        if (patterns_match(spec->hide, spec->n_hide, name))
+            return 1;
+        break;
     case LISZT_IGNORE_DOT_AND_DOTDOT:
-        return len > 0 && name[0] == '.'
-            && (len == 1 || (len == 2 && name[1] == '.'));
+        if (len > 0 && name[0] == '.'
+            && (len == 1 || (len == 2 && name[1] == '.')))
+            return 1;
+        break;
     case LISZT_IGNORE_MINIMAL:
     default:
-        return 0;
+        break;
     }
+    return patterns_match(spec->ignore, spec->n_ignore, name);
 }
 
 int
-liszt_dirread_collect(const char *path, enum liszt_ignore_mode mode,
+liszt_dirread_collect(const char *path,
+                      const struct liszt_ignore_spec *spec,
                       struct liszt_entries *out,
                       liszt_dirread_diag diag, void *ctx)
 {
@@ -26,12 +46,13 @@ liszt_dirread_collect(const char *path, enum liszt_ignore_mode mode,
 
     if (liszt_diropen(path, &d) < 0)
         return -1;
-    liszt_dirread_collect_from(d, mode, out, diag, ctx);
+    liszt_dirread_collect_from(d, spec, out, diag, ctx);
     return 0;
 }
 
 void
-liszt_dirread_collect_from(struct liszt_dir *d, enum liszt_ignore_mode mode,
+liszt_dirread_collect_from(struct liszt_dir *d,
+                           const struct liszt_ignore_spec *spec,
                            struct liszt_entries *out,
                            liszt_dirread_diag diag, void *ctx)
 {
@@ -49,7 +70,7 @@ liszt_dirread_collect_from(struct liszt_dir *d, enum liszt_ignore_mode mode,
                 break;
             continue;
         }
-        if (!ignored(mode, e.name, e.namelen))
+        if (!ignored(spec, e.name, e.namelen))
             liszt_entries_add(out, e.name, e.namelen, e.type);
     }
 

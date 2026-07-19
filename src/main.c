@@ -1124,7 +1124,14 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
             return;
         }
     }
-    liszt_dirread_collect_from(dh, o->ignore, es, on_dirread_fail, &dc);
+    struct liszt_ignore_spec ig = {
+        .mode = o->ignore,
+        .hide = o->hide_patterns,
+        .n_hide = o->n_hide_patterns,
+        .ignore = o->ignore_patterns,
+        .n_ignore = o->n_ignore_patterns
+    };
+    liszt_dirread_collect_from(dh, &ig, es, on_dirread_fail, &dc);
 
     fill_meta(name, o, es);
     decorate_entries(o, es);

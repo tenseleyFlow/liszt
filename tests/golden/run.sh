@@ -736,6 +736,34 @@ printf 'x\n' > "$work/coll/$(printf '\303\251clair')"      # precomposed e-acute
 printf 'x\n' > "$work/coll/$(printf 'e\314\201clair')"     # combining accent
 printf 'x\n' > "$work/coll/$(printf '\303\204pfel')"       # A-umlaut
 printf 'x\n' > "$work/coll/apfel"
+# 07E: the ignore-pattern family. Metacharacter file names ('*', '?q',
+# '[sz]*'-matchable) pin fnmatch semantics; FNM_PERIOD keeps '*~' off
+# dotted backups, which is why -B carries '.*~' too.
+mkdir -p "$work/pats/dir~"
+for n in star a-b ab "x~" "b~" keep.c toss.o z1 z22 "?q" "*"; do
+    printf 'x\n' > "$work/pats/$n"
+done
+printf 'x\n' > "$work/pats/.c~"
+printf 'x\n' > "$work/pats/.hidden"
+printf 'x\n' > "$work/pats/dir~/inner"
+run_case 7 "-B hides backups" C 0 -- -1B "$work/pats"
+run_case 7 "-B with -a keeps dots hides backups" C 0 -- -1Ba "$work/pats"
+run_case 7 "-B long" C 0 -- -lB "$work/pats"
+run_case 7 "ignore accumulates" C 0 -- -1 -I "z*" -I "*.o" "$work/pats"
+run_case 7 "ignore survives -a" C 0 -- -1a -I "z*" "$work/pats"
+run_case 7 "hide default mode" C 0 -- -1 --hide="z*" "$work/pats"
+run_case 7 "hide inert under -a" C 0 -- -1a --hide="z*" "$work/pats"
+run_case 7 "hide inert under -A" C 0 -- -1A --hide="z*" "$work/pats"
+run_case 7 "hide and ignore mix" C 0 -- -1 --hide="z*" -I "*.o" "$work/pats"
+run_case 7 "fnm_period spares dotted" C 0 -- -1a -I "*~" "$work/pats"
+run_case 7 "escaped metachar" C 0 -- -1 -I "\\*" "$work/pats"
+run_case 7 "bracket pattern" C 0 -- -1 -I "[sz]*" "$work/pats"
+run_case 7 "question pattern" C 0 -- -1 -I "?q" "$work/pats"
+run_case 7 "ignore prunes recursion" C 0 -- -R1 -I "dir~" "$work/pats"
+run_case 7 "recursive -B" C 0 -- -R1B "$work/pats"
+run_case 7 "ignore columns" C 0 -- -C --ignore="*.o" "$work/pats"
+run_case 7 "hide utf8" "$U8" 0 -- -1 --hide="z*" "$work/pats"
+
 run_case 7 "collation edges dict" "$D8" 0 -- -1 "$work/coll"
 run_case 7 "collation edges dict -r" "$D8" 0 -- -1r "$work/coll"
 run_case 7 "collation edges C" C 0 -- -1 "$work/coll"

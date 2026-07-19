@@ -171,6 +171,10 @@ gen_plan() {
         if (p < 0.08) flags = flags " --time-style=iso"
         else if (p < 0.16) flags = flags " --time-style=full-iso"
         else if (p < 0.22) flags = flags " --full-time"
+        p = rand()
+        if (p < 0.1) flags = flags " -B"
+        else if (p < 0.18) flags = flags " -I u*"
+        else if (p < 0.24) flags = flags " --hide=?*4"
         if (rand() < 0.2) flags = flags " -s"
         if (rand() < 0.2) flags = flags " -i"
         if (rand() < 0.15) flags = flags " -n"
@@ -243,11 +247,15 @@ EOF
     if [ -z "$flags" ]; then
         : # default sort, no flag words
     fi
+    # set -f: flag words now carry glob patterns (-I u*) that must reach
+    # the tools literally, not expanded against the script's cwd.
+    set -f
     if [ "$style" = "permuted" ]; then
         set -- "$@" $flags
     else
         set -- $flags "$@"
     fi
+    set +f
 
     env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
         LS_COLORS="$FUZZ_LSC" LISZT_DEBUG_VERIFY=1 \

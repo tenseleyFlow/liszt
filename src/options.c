@@ -138,6 +138,10 @@ struct staging {
     int time_type;      /* enum liszt_timetype; mtime unless overridden */
     bool explicit_time; /* -c/-u/--time seen; feeds the sort rule */
     const char *time_style_opt;     /* --time-style/--full-time value */
+    char **hide_patterns;           /* --hide accumulation */
+    int n_hide_patterns;
+    char **ignore_patterns;         /* -I and -B accumulation */
+    int n_ignore_patterns;
     bool print_owner;
     bool print_group;
     bool print_author;
@@ -257,6 +261,14 @@ argmatch_die(const char *context, const char *arg,
        gnulib exit_failure keeps its EXIT_FAILURE default in ls. */
     liszt_try_help_print();
     exit(LISZT_STATUS_MINOR);
+}
+
+static void
+add_pattern(char ***list, int *n, const char *pat)
+{
+    *list = liszt_xrealloc(*list, (size_t)(*n + 1) * sizeof **list);
+    /* Argv and literal strings both outlive the run; no copy. */
+    (*list)[(*n)++] = (char *)(uintptr_t)pat;
 }
 
 /* gnulib hard_locale for LC_TIME: anything but C/POSIX. */
@@ -389,6 +401,18 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_TIME_STYLE:
         st->time_style_opt = value;
+        break;
+    case 'B':
+        /* GNU adds both to the -I list; FNM_PERIOD makes the second
+           necessary for dotted backups. */
+        add_pattern(&st->ignore_patterns, &st->n_ignore_patterns, "*~");
+        add_pattern(&st->ignore_patterns, &st->n_ignore_patterns, ".*~");
+        break;
+    case 'I':
+        add_pattern(&st->ignore_patterns, &st->n_ignore_patterns, value);
+        break;
+    case KEY_HIDE:
+        add_pattern(&st->hide_patterns, &st->n_hide_patterns, value);
         break;
     case 'v':
         st->sort_opt = LISZT_SORT_VERSION;
@@ -726,6 +750,10 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .time_type = LISZT_TIME_MTIME,
         .explicit_time = false,
         .time_style_opt = NULL,
+        .hide_patterns = NULL,
+        .n_hide_patterns = 0,
+        .ignore_patterns = NULL,
+        .n_ignore_patterns = 0,
         .print_owner = true,
         .print_group = true,
         .print_author = false,
@@ -823,6 +851,10 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     else
         o->sort = LISZT_SORT_NAME;
     o->time_type = (enum liszt_timetype)st.time_type;
+    o->hide_patterns = st.hide_patterns;
+    o->n_hide_patterns = st.n_hide_patterns;
+    o->ignore_patterns = st.ignore_patterns;
+    o->n_ignore_patterns = st.n_ignore_patterns;
     if (st.deref_opt >= 0)
         o->deref = (enum liszt_deref)st.deref_opt;
     else

@@ -48,6 +48,12 @@ struct liszt_options {
     enum liszt_sortword sort;
     enum liszt_timetype time_type;
     enum liszt_ignore_mode ignore;
+    /* --hide and -I/-B pattern lists (xmalloc'd, argv-backed strings);
+       hide is inert outside the default ignore mode. */
+    char **hide_patterns;
+    int n_hide_patterns;
+    char **ignore_patterns;
+    int n_ignore_patterns;
     enum liszt_deref deref;
     bool reverse;
     bool group_directories_first;
