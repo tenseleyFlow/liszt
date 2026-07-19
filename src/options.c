@@ -456,6 +456,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     case LISZT_SORT_NONE:
     case LISZT_SORT_NAME:
     case LISZT_SORT_EXTENSION:
+    case LISZT_SORT_VERSION:
         break;
     default:
         liszt_die(LISZT_STATUS_SERIOUS, 0,

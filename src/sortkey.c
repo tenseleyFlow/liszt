@@ -80,6 +80,142 @@ liszt_locale_collation_identity(void)
     return identity_cached != 0;
 }
 
+/* --- filevercmp (rank's counted-byte port of gnulib) ------------------ */
+
+static bool
+ver_digit(unsigned char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+static bool
+ver_alpha(unsigned char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static bool
+ver_alnum(unsigned char c)
+{
+    return ver_alpha(c) || ver_digit(c);
+}
+
+static size_t
+version_file_prefix_len(const unsigned char *text, size_t len)
+{
+    size_t prefix_len = 0;
+    size_t i = 0;
+
+    for (;;) {
+        if (i == len)
+            return prefix_len;
+        i++;
+        prefix_len = i;
+        while (i + 1 < len && text[i] == '.'
+               && (ver_alpha(text[i + 1]) || text[i + 1] == '~')) {
+            i += 2;
+            while (i < len && (ver_alnum(text[i]) || text[i] == '~'))
+                i++;
+        }
+    }
+}
+
+static int
+version_order(const unsigned char *text, size_t pos, size_t len)
+{
+    if (pos == len)
+        return -1;
+    unsigned char byte = text[pos];
+    if (ver_digit(byte))
+        return 0;
+    if (ver_alpha(byte))
+        return (int)byte;
+    if (byte == '~')
+        return -2;
+    return (int)byte + 256;
+}
+
+static int
+version_reverse_compare(const unsigned char *a, size_t a_len,
+                        const unsigned char *b, size_t b_len)
+{
+    size_t ai = 0;
+    size_t bi = 0;
+
+    while (ai < a_len || bi < b_len) {
+        int first_diff = 0;
+
+        while ((ai < a_len && !ver_digit(a[ai]))
+               || (bi < b_len && !ver_digit(b[bi]))) {
+            int ao = version_order(a, ai, a_len);
+            int bo = version_order(b, bi, b_len);
+            if (ao != bo)
+                return ao - bo;
+            ai++;
+            bi++;
+        }
+        while (ai < a_len && a[ai] == '0')
+            ai++;
+        while (bi < b_len && b[bi] == '0')
+            bi++;
+        while (ai < a_len && bi < b_len && ver_digit(a[ai])
+               && ver_digit(b[bi])) {
+            if (first_diff == 0)
+                first_diff = (int)a[ai] - (int)b[bi];
+            ai++;
+            bi++;
+        }
+        if (ai < a_len && ver_digit(a[ai]))
+            return 1;
+        if (bi < b_len && ver_digit(b[bi]))
+            return -1;
+        if (first_diff != 0)
+            return first_diff;
+    }
+    return 0;
+}
+
+static int
+filevercmp(const char *sa, const char *sb)
+{
+    const unsigned char *a = (const unsigned char *)sa;
+    const unsigned char *b = (const unsigned char *)sb;
+    size_t a_len = strlen(sa);
+    size_t b_len = strlen(sb);
+
+    if (a_len == 0)
+        return b_len == 0 ? 0 : -1;
+    if (b_len == 0)
+        return 1;
+
+    /* "" < "." < ".." < other dotfiles < the rest. */
+    if (a[0] == '.') {
+        if (b[0] != '.')
+            return -1;
+        bool a_dot = a_len == 1, b_dot = b_len == 1;
+        if (a_dot)
+            return b_dot ? 0 : -1;
+        if (b_dot)
+            return 1;
+        bool a_dd = a_len == 2 && a[1] == '.';
+        bool b_dd = b_len == 2 && b[1] == '.';
+        if (a_dd)
+            return b_dd ? 0 : -1;
+        if (b_dd)
+            return 1;
+    } else if (b[0] == '.') {
+        return 1;
+    }
+
+    size_t ap = version_file_prefix_len(a, a_len);
+    size_t bp = version_file_prefix_len(b, b_len);
+    bool one_pass_only = ap == a_len && bp == b_len;
+    int result = version_reverse_compare(a, ap, b, bp);
+    if (result != 0 || one_pass_only)
+        return result;
+    return version_reverse_compare(a, a_len, b, b_len);
+}
+
 /* --- scalar comparator chain (the oracle) ----------------------------- */
 
 /* GNU xstrcoll: on strcoll error, diagnose (minor status) and longjmp;
@@ -118,6 +254,12 @@ chain_cmp(const char *a, const char *b)
     switch (S.word) {
     case LISZT_SORT_EXTENSION:
         diff = extension_cmp(a, b);
+        break;
+    case LISZT_SORT_VERSION:
+        S.comparator_calls++;
+        diff = filevercmp(a, b);
+        if (diff == 0)
+            diff = strcmp(a, b);
         break;
     case LISZT_SORT_NAME:
     default:

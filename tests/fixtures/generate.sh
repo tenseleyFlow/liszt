@@ -129,6 +129,15 @@ done
 long=$(awk 'BEGIN { s = ""; for (i = 0; i < 200; i++) s = s "L"; print s }')
 printf 'l\n' > "$root/shapes/$long"
 
+# Version-sort shapes (-v): numeric runs, leading zeros, tildes, suffix
+# trimming, dotfile ordering.
+mkdir -p "$root/versions"
+for n in pkg-1.2.3 pkg-1.2.10 pkg-1.10.1 pkg-2.0 pkg-10.0 v1.0 'v1.0~rc1' \
+    'v1.0~rc2' a2b a10b x2 x10 001 01 1 '1.2.3-alpha' '1.2.3-alpha.tar.gz' \
+    '1.2.3-beta.tar.gz' 'z~' zz .v2 .v10; do
+    printf 'v\n' > "$root/versions/$n"
+done
+
 # --- links ----------------------------------------------------------------
 
 printf 't\n' > "$root/links/target"

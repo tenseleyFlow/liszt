@@ -43,12 +43,12 @@ checks=$((checks + 1))
 conf_ver=$(sed -n 's/^LISZT_VERSION="\(.*\)"/\1/p' configure)
 check_eq "configure/binary version agree" "liszt $conf_ver" "$(./liszt --version)"
 
-# Unimplemented surface exits 2 with a diagnostic; sorted listings are
-# sprint 02, so a bare invocation (default sort=name) still exits 2.
-check_status "bare invocation exits 2" 2 ./liszt
+# Sorted listings landed in sprint 02: bare invocations work.
+check_status "bare invocation lists cwd" 0 ./liszt
+check_status "default-sort operand works" 0 ./liszt /tmp
 check_status "unknown option exits 2" 2 ./liszt --bogus
-check_status "default-sort operand exits 2" 2 ./liszt /tmp
 check_status "argmatch error exits 1 (GNU quirk)" 1 ./liszt --format=bogus
+check_status "unsupported sort word exits 2" 2 ./liszt --sort=width
 
 # Functional sprint-01 surface.
 udir=$(mktemp -d "${TMPDIR:-/tmp}/liszt-unit.XXXXXX")
@@ -67,7 +67,7 @@ check_eq "-A adds dotfiles only" "$((n_default + 1))" "$n_almost"
 fmt_out=$(./liszt -U --format=single-column "$udir")
 one_out=$(./liszt -U1 "$udir")
 check_eq "--format=single-column equals -1" "$one_out" "$fmt_out"
-err=$(./liszt 2>&1 >/dev/null)
+err=$(./liszt /liszt-no-such 2>&1 >/dev/null)
 case "$err" in
 liszt:*) : ;;
 *) note_fail "diagnostic prefix: got [$err]" ;;
@@ -75,12 +75,21 @@ esac
 checks=$((checks + 1))
 
 # lz diagnostics carry the lz program name.
-err=$(./lz 2>&1 >/dev/null)
+err=$(./lz /liszt-no-such 2>&1 >/dev/null)
 case "$err" in
 lz:*) : ;;
 *) note_fail "lz diagnostic prefix: got [$err]" ;;
 esac
 checks=$((checks + 1))
+
+# Plan selection and debug surface.
+p=$(LC_ALL=C LISZT_DEBUG_PLAN=1 ./liszt "$udir" 2>&1 >/dev/null)
+case "$p" in *radix-bytes*) : ;; *) note_fail "C plan: [$p]" ;; esac
+checks=$((checks + 1))
+p=$(LISZT_FORCE_SCALAR=1 LISZT_DEBUG_PLAN=1 ./liszt "$udir" 2>&1 >/dev/null)
+case "$p" in *scalar*) : ;; *) note_fail "forced scalar plan: [$p]" ;; esac
+checks=$((checks + 1))
+check_status "verify oracle passes" 0 env LISZT_DEBUG_VERIFY=1 ./liszt "$udir"
 
 # Fixture generator is deterministic: same seed, same manifest.
 fixwork=$(mktemp -d "${TMPDIR:-/tmp}/liszt-fix.XXXXXX")
