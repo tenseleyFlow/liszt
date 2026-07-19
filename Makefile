@@ -103,8 +103,8 @@ install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/man/man1
 	install -m 0755 liszt $(DESTDIR)$(PREFIX)/bin/liszt
 	ln -sf liszt $(DESTDIR)$(PREFIX)/bin/lz
-	test -f doc/liszt.1 && install -m 0644 doc/liszt.1 \
-		$(DESTDIR)$(PREFIX)/share/man/man1/liszt.1 || true
+	install -m 0644 doc/liszt.1 $(DESTDIR)$(PREFIX)/share/man/man1/liszt.1
+	install -m 0644 doc/lz.1 $(DESTDIR)$(PREFIX)/share/man/man1/lz.1
 
 clean:
 	rm -f liszt lz $(OBJ) $(DEP)

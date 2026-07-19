@@ -1,0 +1,131 @@
+.TH LISZT 1 "2026-07-19" "liszt" "User Commands"
+.SH NAME
+liszt, lz \- list directory contents, byte-identical to GNU ls, faster
+.SH SYNOPSIS
+.B liszt
+.RI [ OPTION ]...
+.RI [ FILE ]...
+.br
+.B lz
+.RI [ OPTION ]...
+.RI [ FILE ]...
+.SH DESCRIPTION
+.B liszt
+is a from-scratch C11 reimplementation of GNU
+.BR ls (1)
+(coreutils 9.11). Under a pinned environment (locale, TZ, COLUMNS,
+LS_COLORS, piped stdout) its output is byte-identical to GNU ls on
+every supported flag, and faster on every measured workload.
+.B lz
+is the same binary under a shorter name; it prints
+.B liszt
+as its program name in version output and diagnostics keep the invoked
+name, exactly as GNU ls behaves when renamed.
+.PP
+The complete GNU ls 9.11 option surface is supported: formats
+.RB ( \-l ,
+.BR \-C ,
+.BR \-x ,
+.BR \-m ,
+.BR \-1 ),
+sorting
+.RB ( \-t ,
+.BR \-S ,
+.BR \-v ,
+.BR \-X ,
+.BR \-U ,
+.BR \-\-sort ),
+recursion and dereferencing
+.RB ( \-R ,
+.BR \-H ,
+.BR \-L ),
+color and indicators
+.RB ( \-\-color ,
+.BR \-F ,
+.BR \-p ,
+.BR \-\-file\-type ),
+quoting styles, time words and styles
+.RB ( \-\-time ,
+.BR \-\-time\-style ,
+.BR \-\-full\-time ),
+ignore patterns
+.RB ( \-\-hide ,
+.BR \-I ,
+.BR \-B ),
+and the oddballs
+.RB ( \-\-dired ,
+.BR \-\-hyperlink ,
+.BR \-\-zero ,
+.BR \-Z ,
+.BR \-\-author ).
+See
+.BR ls (1)
+for option semantics; they are identical by construction and pinned by
+a differential test suite against the reference implementation.
+.SH DEVIATIONS
+One intentional divergence is carried, with its own regression
+registry: GNU ls assigns a rejected display width into an unsigned
+type before clamping, so names containing control bytes or invalid
+multibyte sequences in multibyte locales can wrap column layout
+arithmetic. liszt honors the intended clamp (width 0). Quoted styles
+and
+.B \-q
+are unaffected.
+.SH ENVIRONMENT
+The GNU-compatible variables
+.BR LS_COLORS ,
+.BR COLUMNS ,
+.BR TIME_STYLE ,
+.BR TABSIZE ,
+.BR LS_BLOCK_SIZE ,
+.BR BLOCK_SIZE ,
+.BR BLOCKSIZE ,
+.B POSIXLY_CORRECT
+and the locale variables behave as in
+.BR ls (1).
+.PP
+liszt additionally reads:
+.TP
+.B LISZT_DEBUG_PLAN
+Print the selected sort engine and stat plan to standard error.
+.TP
+.B LISZT_DEBUG_STATS
+Print engine counters (radix passes, comparator calls, time-memo hit
+rate) to standard error.
+.TP
+.B LISZT_DEBUG_VERIFY
+Cross-check optimized engines against the scalar reference oracle;
+mismatches abort. Used by the test harness on every run.
+.TP
+.B LISZT_FORCE_SCALAR
+Disable optimized sort engines for this run.
+.TP
+.B LISZT_PARALLEL_MIN
+Entry-count threshold for the parallel stat phase (default 400).
+Large values force the serial path.
+.TP
+.B LISZT_PARALLEL_WORKERS
+Cap the worker count of the parallel stat phase.
+.SH EXIT STATUS
+.TP
+0
+Success.
+.TP
+1
+Minor problems (for example: cannot access a subdirectory).
+.TP
+2
+Serious trouble (for example: cannot access a command-line argument).
+.SH EXAMPLES
+.TP
+.B lz \-la
+Long listing of the current directory, dotfiles included.
+.TP
+.B liszt \-\-color=always \-F | less \-R
+Colored, classified listing through a pager.
+.SH SEE ALSO
+.BR ls (1),
+.BR dircolors (1)
+.PP
+Project:
+.I https://github.com/tenseleyFlow/liszt
