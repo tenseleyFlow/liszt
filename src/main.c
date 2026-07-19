@@ -547,7 +547,10 @@ operand_item(const void *p, struct liszt_item *out)
     out->size = op->st.size;
     out->mtime = op->st.mtime;
     out->width = op->disp_width + op->padded;
-    out->group_dir = false;     /* grouping cannot affect operand output */
+    /* Under -d, dir operands stay in the batch and GNU's dirs-first
+       prefix groups them (fuzz-pinned); with extraction active the dirs
+       leave the batch anyway, so the truthful value is always right. */
+    out->group_dir = S_ISDIR(op->st.mode) || S_ISDIR(op->linkmode);
 }
 
 /* Operand decoration mirrors the entry pass; the quoted probe spans the

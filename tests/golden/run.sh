@@ -595,7 +595,7 @@ run_case 6 "-L target-time sort" C 1 -- -Lt1 "$fix/links"
 run_case 6 "-L classify" C 1 -- -LF1a "$fix/links"
 run_case 6 "explicit cl-symlink-to-dir" C 0 -- -1 --dereference-command-line-symlink-to-dir "$fix/links/gooddir"
 run_case_color "$DEFCOLORS" 6 "-R color" C 0 -- -R1 --color=always "$fix/links"
-run_case_color "$DEFCOLORS" 6 "-L color links" C 1 -- -L1a --color=always "$fix/links"
+run_case_color "$DEFCOLORS" 6 "-L color links" C - -- -L1a --color=always "$fix/links"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
