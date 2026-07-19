@@ -25,6 +25,9 @@ oracle=$(sh scripts/find-gnu-ls.sh) || {
     exit 77
 }
 
+oracle_is_pin=0
+"$oracle" --version | sed -n 1p | grep -q " 9\.11$" && oracle_is_pin=1
+
 utf8_locale=""
 for loc in en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
     if locale -a 2>/dev/null | grep -qix "$loc"; then
@@ -47,7 +50,7 @@ normprog() {
 # Emit a trial plan: TREE lines (octal-escaped creation commands) then one
 # ARGS line. Consumed line-by-line below.
 gen_plan() {
-    awk -v seed="$seed" -v trial="$1" 'BEGIN {
+    awk -v seed="$seed" -v trial="$1" -v pin="$oracle_is_pin" 'BEGIN {
         srand(seed + trial)
         r = int(rand() * 1000000)
 
@@ -101,7 +104,7 @@ gen_plan() {
         else if (p < 0.45) flags = "-S"
         else if (p < 0.55) flags = "-v"
         else if (p < 0.62) flags = "-X"
-        else if (p < 0.68) flags = "-f"
+        else if (p < 0.68) flags = pin ? "-f" : "-U"
         else if (p < 0.74) flags = "--sort=version"
         else flags = ""             # default name sort
         if (rand() < 0.3) flags = flags " -r"

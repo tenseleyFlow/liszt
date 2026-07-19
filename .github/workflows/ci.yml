@@ -19,6 +19,13 @@ jobs:
       - name: install GNU coreutils oracle (macOS)
         if: runner.os == 'macOS'
         run: brew install coreutils
+      - name: cache pinned oracle
+        uses: actions/cache@v4
+        with:
+          path: build/gnu-ls
+          key: gnu-ls-9.11-${{ runner.os }}-v1
+      - name: build pinned oracle (coreutils 9.11)
+        run: sh scripts/build-gnu-ls.sh
       - run: ./configure
       - run: make
       - run: make check

@@ -28,9 +28,12 @@ oracle=$(sh scripts/find-gnu-ls.sh) || {
     exit 77
 }
 oracle_version=$("$oracle" --version | sed -n '1s/.*coreutils) //p')
+oracle_is_pin=0
 case "$oracle_version" in
-9.11) ;;
-*) echo "tests/golden: WARNING oracle is coreutils $oracle_version, pin is 9.11" >&2 ;;
+9.11) oracle_is_pin=1 ;;
+*) echo "tests/golden: WARNING oracle is coreutils $oracle_version, pin is 9.11;" \
+        "pin-sensitive cases will be skipped (build the pin:" \
+        "scripts/build-gnu-ls.sh)" >&2 ;;
 esac
 
 # Locale legs: C always; UTF-8 legs when present. Refuse to run without a
@@ -154,6 +157,15 @@ if [ -f tests/golden/PARITY_ACTIVE ]; then
     active=$(cat tests/golden/PARITY_ACTIVE)
 fi
 
+# run_case_pin911: like run_case, but only against the exact pinned
+# oracle - for behaviors that changed between coreutils vintages (-f
+# last-wins, the --sort word table).
+run_case_pin911() {
+    if [ "$oracle_is_pin" -eq 1 ]; then
+        run_case "$@"
+    fi
+}
+
 # run_case SPRINT name locale wantrc -- flags/operands...
 # Compares stdout byte-exact, stderr after normprog, and exit codes between
 # liszt.uut and the oracle. wantrc '-' skips the explicit rc assertion (the
@@ -240,8 +252,8 @@ run_case 2 "sorted shapes -a utf8" "$U8" 0 -- -1a "$fix/shapes"
 run_case 2 "sorted shapes -a dict" "$D8" 0 -- -1a "$fix/shapes"
 run_case 2 "sorted reverse dict" "$D8" 0 -- -1r "$fix/shapes"
 run_case 2 "sorted links -a" C 0 -- -1a "$fix/links"
-run_case 2 "-f is -aU" C 0 -- -f1 "$fix/plain"
-run_case 2 "-f last-wins with sort word" C 0 -- -f1 --sort=name "$fix/plain"
+run_case_pin911 2 "-f is -aU" C 0 -- -f1 "$fix/plain"
+run_case_pin911 2 "-f last-wins with sort word" C 0 -- -f1 --sort=name "$fix/plain"
 run_case 2 "version sort" C 0 -- -1v "$fix/versions"
 run_case 2 "version sort -a" C 0 -- -1va "$fix/versions"
 run_case 2 "version reverse" C 0 -- -1vr "$fix/versions"
@@ -259,8 +271,8 @@ run_case 2 "group with -U disabled" C 0 -- -1aU --group-directories-first "$fix/
 run_case 2 "group with -S" C 0 -- -1aS --group-directories-first "$fix/links"
 run_case 2 "sorted operands mix" C 2 -- -1 "$fix/times/recent-a" "$work/nope" "$fix/plain" "$fix/times/old-a"
 run_case 2 "size-sorted operands" C 0 -- -1S "$fix/sizes/sz512" "$fix/sizes/sz1" "$fix/sizes/sz65536"
-run_case 2 "sort word invalid" C 1 -- --sort=bogus
-run_case 2 "sort word ambiguous" C 1 -- --sort=n
+run_case_pin911 2 "sort word invalid" C 1 -- --sort=bogus
+run_case_pin911 2 "sort word ambiguous" C 1 -- --sort=n
 run_case 2 "sorted two dirs" C 0 -- -1 "$fix/links" "$fix/plain"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
