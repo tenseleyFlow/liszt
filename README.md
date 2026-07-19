@@ -2,6 +2,8 @@
 
 [![ci](https://github.com/tenseleyFlow/liszt/actions/workflows/ci.yml/badge.svg)](https://github.com/tenseleyFlow/liszt/actions/workflows/ci.yml)
 
+(noun) : Franz?!
+
 A from-scratch C11 reimplementation of GNU `ls(1)`. Byte-identical output
 (parity target: coreutils 9.11), faster on every workload measured. Also
 installs as `lz`, which is easier to type than `ls`.
