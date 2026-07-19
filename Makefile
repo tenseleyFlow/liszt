@@ -76,10 +76,12 @@ gitcheck: all
 fuzz-smoke: all
 	FUZZ_TRIALS=25 sh tests/fuzz/run.sh || test $$? -eq 77
 	FUZZ_TRIALS=10 sh tests/fuzz/run-tree.sh
+	FUZZ_TRIALS=8 sh tests/fuzz/run-git.sh || test $$? -eq 77
 
 fuzz: all
 	sh tests/fuzz/run.sh
 	sh tests/fuzz/run-tree.sh
+	sh tests/fuzz/run-git.sh || test $$? -eq 77
 
 perf-smoke: all
 	sh bench/run-smoke.sh || test $$? -eq 77
@@ -97,8 +99,10 @@ tsan:
 	$(MAKE) all CFLAGS='$(CFLAGS) -fsanitize=thread' LDFLAGS='$(LDFLAGS) -fsanitize=thread'
 	LISZT_PARALLEL_MIN=1 sh tests/golden/run.sh
 	LISZT_PARALLEL_MIN=1 sh tests/tree/run.sh
+	LISZT_PARALLEL_MIN=1 sh tests/git/run.sh || test $$? -eq 77
 	FUZZ_TRIALS=10 LISZT_PARALLEL_MIN=1 sh tests/fuzz/run.sh || test $$? -eq 77
 	FUZZ_TRIALS=10 LISZT_PARALLEL_MIN=1 sh tests/fuzz/run-tree.sh
+	FUZZ_TRIALS=8 LISZT_PARALLEL_MIN=1 sh tests/fuzz/run-git.sh || test $$? -eq 77
 	$(MAKE) clean
 	$(MAKE) all
 
