@@ -193,6 +193,48 @@ it matches, and only SGR sequences are added: stripping them yields
 .B \-\-color=always
 output byte for byte. The word matches by exact spelling only; every
 other value keeps GNU's behavior exactly.
+.TP
+.BI \-\-theme= NAME
+Select a built-in color theme (implies
+.BR \-\-color=full ).
+Presets ship in the binary and emit 24-bit color, exact regardless of
+the terminal palette:
+.B default
+(the 16-color theme, riding the terminal palette),
+.BR black ,
+.BR catppuccin\-frappe ,
+.BR catppuccin\-latte ,
+.BR catppuccin\-macchiato ,
+.BR catppuccin\-mocha ,
+.BR dracula ,
+.BR everforest ,
+.BR frosty ,
+.BR gruvbox\-dark ,
+.BR gruvbox\-light ,
+.BR kanagawa\-dragon ,
+.BR kanagawa\-lotus ,
+.BR kanagawa\-wave ,
+.BR monokai ,
+.BR nord ,
+.BR one\-dark ,
+.BR rose\-pine ,
+.BR rose\-pine\-dawn ,
+.BR rose\-pine\-moon ,
+.BR solarized\-dark ,
+.BR tokyonight ,
+.BR white .
+Names match exactly; an unknown name lists the valid ones. The
+.B LISZT_THEME
+environment variable supplies the default (unknown values there
+diagnose and keep the default theme);
+.B LISZT_COLORS
+overrides single keys on top of any theme using the LS_COLORS grammar
+with eza's two-letter vocabulary (ur uw ux ue gr gw gx tr tw tx su sf,
+lc lm, uu gu, nb nk nm ng nt df ds, da in bl xx, ga gm gd gv gt gi gc,
+im vi mu lo cr do co tm cm bu sc, and the filekinds fi di ln pi bd cd
+so ex or). An explicit non-empty
+.B LS_COLORS
+still wins for filenames; LISZT_COLORS outranks both.
 .SH ENVIRONMENT
 The GNU-compatible variables
 .BR LS_COLORS ,

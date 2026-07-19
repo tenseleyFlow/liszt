@@ -121,6 +121,12 @@ by exact spelling only (no abbreviation).
   sizes, dates, inodes, plus eza's filename classes where LS_COLORS
   is silent. Exact spelling only; stripping the SGR reproduces
   `--color=always` byte for byte.
+- `--theme=NAME` - 23 built-in 24-bit presets (catppuccin, dracula,
+  gruvbox, kanagawa, nord, monokai, everforest, rose-pine,
+  tokyonight, solarized, one-dark, ...) compiled in; eza makes you
+  download these as YAML files. `LISZT_THEME` sets the default,
+  `LISZT_COLORS` overrides single keys in eza's EZA_COLORS grammar.
+  No config file: zero startup cost.
 - `--git` - a status column with zero dependencies: liszt parses
   `.git/index` itself (v2-v4, SHA-256 repos, linked worktrees) and
   compares stat data - nothing is hashed, adding a constant ~30

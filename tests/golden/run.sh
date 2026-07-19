@@ -1097,6 +1097,68 @@ if ! cmp -s "$work/cf1.out" "$work/cf2.out"; then
     fails=$((fails + 1))
 fi
 
+# 17: themes. Pinned dracula metadata (-go, 24-bit codes are
+# machine-independent); LISZT_COLORS override; LS_COLORS-beats-theme
+# for filenames; themed strip-identity; error lanes.
+run_case_ext th-dracula 17 "dracula -go metadata" C 0 \
+    -- --theme=dracula -gon "$cffix"
+run_case_ext th-classes 17 "nord filename classes" C 0 \
+    -- --theme=nord -1 "$work/ccfix"
+if [ 17 -le "$active" ]; then
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 \
+        LISZT_COLORS='sc=38;2;255;0;0' LISZT_DEBUG_VERIFY=1 \
+        "$work/liszt.uut" --theme=nord -1 "$work/ccfix" \
+        > "$work/thov.out" 2>/dev/null
+    grep -q "38;2;255;0;0mmain.c" "$work/thov.out" || {
+        echo "EXT CASE FAIL [LISZT_COLORS overrides theme]" >&2
+        fails=$((fails + 1))
+    }
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 \
+        LS_COLORS='*.c=01;35' LISZT_DEBUG_VERIFY=1 \
+        "$work/liszt.uut" --theme=nord -1 "$work/ccfix" \
+        > "$work/thlsc.out" 2>/dev/null
+    grep -q "01;35mmain.c" "$work/thlsc.out" || {
+        echo "EXT CASE FAIL [LS_COLORS beats theme for filenames]" >&2
+        fails=$((fails + 1))
+    }
+    # Strip-identity holds under any theme.
+    cases=$((cases + 1))
+    run_pinned C "$work/liszt.uut" --theme=tokyonight -la \
+        "$work/icofix" 2>/dev/null \
+        | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf1.out"
+    run_pinned C "$work/liszt.uut" --color=always -la "$work/icofix" \
+        2>/dev/null | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf2.out"
+    if ! cmp -s "$work/cf1.out" "$work/cf2.out"; then
+        echo "EXT CASE FAIL [themed strip identity]" >&2
+        fails=$((fails + 1))
+    fi
+    # Errors: flag hard (exit 1 + listing), env soft (diagnostic,
+    # default theme, exit 0).
+    cases=$((cases + 1))
+    run_pinned C "$work/liszt.uut" --theme=bogus "$work/ccfix" \
+        > /dev/null 2> "$work/therr.txt"
+    rc=$?
+    if [ "$rc" -ne 1 ] || ! grep -q "Valid themes are" "$work/therr.txt"
+    then
+        echo "EXT CASE FAIL [unknown theme flag] rc=$rc" >&2
+        fails=$((fails + 1))
+    fi
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 \
+        LISZT_THEME=bogus LISZT_DEBUG_VERIFY=1 \
+        "$work/liszt.uut" --color=full -1 "$work/ccfix" \
+        > "$work/thsoft.out" 2> "$work/thsoft.err"
+    rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -q "unknown theme" "$work/thsoft.err"
+    then
+        echo "EXT CASE FAIL [unknown LISZT_THEME soft] rc=$rc" >&2
+        fails=$((fails + 1))
+    fi
+fi
+run_case 17 "ext guard --them unrecognized" C 2 -- --them
+
 # 11: extension-table invisibility guards. The ext_longopts exact-match
 # layer must never perturb GNU-surface parsing: abbreviation matching,
 # ambiguity listings, and unrecognized-option diagnostics all come from

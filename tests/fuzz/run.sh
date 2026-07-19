@@ -315,7 +315,11 @@ EOF
     if [ $((t % 7)) -eq 0 ]; then
         env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
             LS_COLORS="$FUZZ_LSC" \
-            "$work/liszt.uut" --color=full -la "$tree" 2>/dev/null \
+            "$work/liszt.uut" --color=full \
+            --theme=$(case $((t % 4)) in 0) echo default ;; \
+                1) echo dracula ;; 2) echo nord ;; \
+                *) echo catppuccin-mocha ;; esac) -la "$tree" \
+            2>/dev/null \
             | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf1"
         env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
             LS_COLORS="$FUZZ_LSC" \

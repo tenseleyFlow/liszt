@@ -279,8 +279,11 @@ liszt_colors_parse(bool *color_enabled)
     struct color_ext_type *ext = NULL;
 
     if ((p = getenv("LS_COLORS")) == NULL || *p == '\0') {
+        /* GNU's dumb-terminal veto - unless a theme supplies the
+           scheme itself. */
         const char *colorterm = getenv("COLORTERM");
-        if (!(colorterm && *colorterm) && !known_term_type())
+        if (!(colorterm && *colorterm) && !known_term_type()
+            && !liszt_theme_active())
             *color_enabled = false;
         /* No scheme: a selected theme's filekind styles become the
            filename colors (explicit LS_COLORS always wins). */
