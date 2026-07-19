@@ -41,6 +41,12 @@ trap 'rm -rf "$work"' EXIT INT TERM
 faildir="tests/.work/fuzz-failures"
 
 cp ./liszt "$work/liszt.uut"
+# Trials draw -a with -l: ".." is the work dir itself, and its size
+# moves with its entry count on tmpfs. Pre-create every capture file
+# so the two tools see one directory (a trial-1 flake otherwise).
+: > "$work/u.out"; : > "$work/u.raw"; : > "$work/u.err"
+: > "$work/o.out"; : > "$work/o.raw"; : > "$work/o.err"
+: > "$work/ic0"; : > "$work/ic1"; : > "$work/ic2"; : > "$work/ic2e"
 FUZZ_LSC=$(dircolors -b 2>/dev/null | sed -n "s/^LS_COLORS='\(.*\)';\$/\1/p")
 
 normprog() {
