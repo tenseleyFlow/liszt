@@ -275,6 +275,62 @@ run_case_pin911 2 "sort word invalid" C 1 -- --sort=bogus
 run_case_pin911 2 "sort word ambiguous" C 1 -- --sort=n
 run_case 2 "sorted two dirs" C 0 -- -1 "$fix/links" "$fix/plain"
 
+# 03: the -l lane. Both tools run as the same user on the same tree, so
+# owner/group names need no normalization; device goldens stay out (the
+# privileged fixture tier owns them - /dev mtimes flake).
+run_case 3 "-l times" C 0 -- -l "$fix/times"
+run_case 3 "-l times utf8" "$U8" 0 -- -l "$fix/times"
+run_case 3 "-l times dict" "$D8" 0 -- -l "$fix/times"
+run_case 3 "-l sizes" C 0 -- -l "$fix/sizes"
+run_case 3 "-l links -a" C 0 -- -la "$fix/links"
+run_case 3 "-l meta -a (acl suffix)" C 0 -- -la "$fix/meta"
+run_case 3 "-l shapes -a" C 0 -- -la "$fix/shapes"
+run_case 3 "-ln numeric" C 0 -- -ln "$fix/plain"
+run_case 3 "-lg no owner" C 0 -- -lg "$fix/times"
+run_case 3 "-lo no group" C 0 -- -lo "$fix/times"
+run_case 3 "-lG no group" C 0 -- -lG "$fix/times"
+run_case 3 "-l --author" C 0 -- -l --author "$fix/times"
+run_case 3 "-lh human" C 0 -- -lh "$fix/sizes"
+run_case 3 "-l --si" C 0 -- -l --si "$fix/sizes"
+run_case 3 "-lk kibibytes" C 0 -- -lk "$fix/sizes"
+run_case 3 "block-size 1M" C 0 -- -l --block-size=1M "$fix/sizes"
+run_case 3 "block-size KiB" C 0 -- -l --block-size=KiB "$fix/sizes"
+run_case 3 "block-size grouped" C 0 -- -l "--block-size='1" "$fix/sizes"
+run_case 3 "block-size invalid" C 2 -- -l --block-size=bogus "$fix/sizes"
+run_case 3 "-s blocks short" C 0 -- -1s "$fix/sizes"
+run_case 3 "-i inode short" C 0 -- -1i "$fix/plain"
+run_case 3 "-lsi combined" C 0 -- -lsi "$fix/sizes"
+run_case 3 "-l file operands" C 0 -- -l "$fix/times/old-a" "$fix/sizes/sz512"
+run_case 3 "-l symlink operand" C 0 -- -l "$fix/links/good"
+run_case 3 "-l dangling operand" C 0 -- -l "$fix/links/dangling"
+run_case 3 "-lt sorted" C 0 -- -lt "$fix/times"
+run_case 3 "-lS sorted" C 0 -- -lS "$fix/sizes"
+run_case 3 "-lv versions" C 0 -- -lv "$fix/versions"
+run_case 3 "-l sparse" C 0 -- -l "$fix/sizes"
+run_case 3 "-l perm -a" C 0 -- -la "$fix/perm"
+run_case 3 "-l group-dirs" C 0 -- -la --group-directories-first "$fix/links"
+
+# 03 bespoke: env block size and POSIXLY_CORRECT totals.
+if [ 3 -le "$active" ]; then
+    for envspec in "LS_BLOCK_SIZE=1M" "BLOCK_SIZE=512" "POSIXLY_CORRECT=1" \
+        "BLOCKSIZE=64K" "LS_BLOCK_SIZE=human-readable"; do
+        cases=$((cases + 1))
+        env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 LS_COLORS= \
+            LISZT_DEBUG_VERIFY=1 "$envspec" \
+            "$work/liszt.uut" -ls "$fix/sizes" > "$work/u.out" 2>/dev/null
+        urc=$?
+        env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 LS_COLORS= \
+            "$envspec" \
+            "$oracle" -ls "$fix/sizes" > "$work/o.out" 2>/dev/null
+        orc=$?
+        if [ "$urc" -ne "$orc" ] || ! cmp -s "$work/u.out" "$work/o.out"; then
+            echo "CASE FAIL [block-size env $envspec]" >&2
+            diff "$work/o.out" "$work/u.out" | head -6 >&2
+            fails=$((fails + 1))
+        fi
+    done
+fi
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

@@ -110,12 +110,19 @@ gen_plan() {
         if (rand() < 0.3) flags = flags " -r"
         if (rand() < 0.25) flags = flags " --group-directories-first"
         p = rand()
-        if (p < 0.4) flags = flags " -1"
-        else if (p < 0.6) flags = flags " --format=single-column"
+        if (p < 0.3) flags = flags " -1"
+        else if (p < 0.45) flags = flags " --format=single-column"
+        else if (p < 0.75) flags = flags " -l"
         # else: piped default resolves to one-per-line
         p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
+        # Long-lane extras compose with any format (frills) or -l.
+        if (rand() < 0.2) flags = flags " -s"
+        if (rand() < 0.2) flags = flags " -i"
+        if (rand() < 0.15) flags = flags " -n"
+        if (rand() < 0.15) flags = flags " -h"
+        if (rand() < 0.1) flags = flags " -G"
         sub(/^ /, "", flags)
 
         # Operands.

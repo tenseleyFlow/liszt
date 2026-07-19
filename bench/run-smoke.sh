@@ -86,6 +86,11 @@ if [ -n "$utf8_locale" ]; then
     row_names="$row_names liszt_default_utf8"
     set -- "$@" "env LC_ALL=$utf8_locale ./liszt $fixture"
 fi
+# The -l lane (sprint 03).
+row_names="$row_names oracle_l_C liszt_l_C"
+set -- "$@" \
+    "env LC_ALL=C $oracle -l $fixture" \
+    "env LC_ALL=C ./liszt -l $fixture"
 row_names="$row_names liszt_startup"
 set -- "$@" "./liszt --version"
 
