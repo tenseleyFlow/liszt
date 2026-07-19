@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 rc=0
-for s in smoke; do
+for s in smoke matrix; do
     sh "bench/run-$s.sh"
     st=$?
     if [ "$st" -ne 0 ] && [ "$st" -ne 77 ]; then
@@ -14,4 +14,11 @@ for s in smoke; do
         rc=1
     fi
 done
+
+sh bench/check-syscalls.sh
+st=$?
+if [ "$st" -ne 0 ] && [ "$st" -ne 77 ]; then
+    echo "bench: check-syscalls.sh failed ($st)" >&2
+    rc=1
+fi
 exit $rc
