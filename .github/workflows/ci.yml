@@ -64,3 +64,25 @@ jobs:
             ./configure
             gmake
             gmake check
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, alpine, freebsd]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: distcheck and tarball
+        run: |
+          ./configure
+          make distcheck
+          sha256sum liszt-*.tar.gz > SHA256SUMS
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "liszt ${GITHUB_REF_NAME}" \
+            --notes "Byte-identical to GNU ls 9.11 under a pinned environment; faster on every measured workload on both release machines (see bench/release/ in the tree for the stored matrices). Full golden, fuzz, and sanitizer gates green on Linux (glibc, musl), macOS, and FreeBSD." \
+            liszt-*.tar.gz SHA256SUMS
