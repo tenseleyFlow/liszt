@@ -138,6 +138,14 @@ chmod 000 "$fx/guard/denied"
 printf '#!/bin/sh\n' > "$fx/exec/runme"
 chmod 755 "$fx/exec/runme"
 printf 'p\n' > "$fx/exec/plain.txt"
+# Alignment fixture: the root list is widest (12000-byte file), so
+# inherited column maxima keep one glyph column for the whole tree.
+mkdir -p "$fx/align/a1/b1"
+LC_ALL=C awk 'BEGIN { for (i = 0; i < 12000; i++) printf "x" }' \
+    > "$fx/align/big.bin"
+printf 'a\n' > "$fx/align/afile"
+printf 'b\n' > "$fx/align/a1/bfile"
+printf 'c\n' > "$fx/align/a1/b1/cfile"
 
 # --- Parser error lanes (13A) --------------------------------------------
 # Child flags without --tree: exit 2, empty stdout.
@@ -276,6 +284,30 @@ tree_struct() {
 tree_struct "-l long format" -l
 tree_struct "-i inodes" -i
 tree_struct "-s blocks" -s
+
+# -l glyph-column alignment: child lists inherit parent column maxima,
+# so with a root-widest fixture every branch glyph sits at
+# pmin + 4 * depth-steps - all positions congruent mod 4.
+cases=$((cases + 1))
+(cd "$fx" && run_pinned C "$work/liszt.uut" --tree -l align) \
+    > "$work/al.out" 2>/dev/null
+if ! LC_ALL=C awk '
+    {
+        b = index($0, "|-- ")
+        l = index($0, "`-- ")
+        p = b && l ? (b < l ? b : l) : (b ? b : l)
+        if (!p) next
+        if (!pmin || p < pmin) pmin = p
+        pos[NR] = p
+    }
+    END {
+        for (i in pos)
+            if ((pos[i] - pmin) % 4 != 0) exit 1
+    }' "$work/al.out"; then
+    echo "TREE CASE FAIL [-l glyph-column alignment]" >&2
+    sed -n '1,6p' "$work/al.out" >&2
+    fails=$((fails + 1))
+fi
 
 # Hyperlink self-identity: strip the OSC 8 wrappers, get the plain run.
 cases=$((cases + 1))

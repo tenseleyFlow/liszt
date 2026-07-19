@@ -2030,11 +2030,32 @@ tree_path_push(struct tree_ctx *tc, const char *name, size_t len,
     tc->path[tc->path_len] = '\0';
 }
 
+/* Child sibling lists inherit the parent's column maxima: a one-pass
+   walk cannot know future widths, but monotone widths keep the glyph
+   column steady unless a subtree genuinely outgrows its parent (whole-
+   tree alignment stays deferred: --tree-align=global). */
+static void
+widths_merge(struct lwidths *w, const struct lwidths *pw)
+{
+    if (pw->inode > w->inode) w->inode = pw->inode;
+    if (pw->blocks > w->blocks) w->blocks = pw->blocks;
+    if (pw->nlink > w->nlink) w->nlink = pw->nlink;
+    if (pw->owner > w->owner) w->owner = pw->owner;
+    if (pw->group > w->group) w->group = pw->group;
+    if (pw->author > w->author) w->author = pw->author;
+    if (pw->size > w->size) w->size = pw->size;
+    if (pw->major > w->major) w->major = pw->major;
+    if (pw->minor > w->minor) w->minor = pw->minor;
+    if (pw->scontext > w->scontext) w->scontext = pw->scontext;
+    w->any_acl = w->any_acl || pw->any_acl;
+}
+
 /* List the directory at tc->path, whose entries sit at DEPTH (root
    operand line = depth 0). Entered iff --level is 0 or depth < level:
    boundary dirs at the level are shown, never entered. */
 static void
-tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
+tree_walk(struct tree_ctx *tc, size_t depth, bool command_line,
+          const struct lwidths *pw)
 {
     const struct liszt_options *o = tc->o;
     struct liszt_dir *dh;
@@ -2101,6 +2122,8 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
             entry_to_item(es, &es->v[i], &wit);
             widths_add(&w, o, &wit);
         }
+        if (pw != NULL)
+            widths_merge(&w, pw);
     }
 
     size_t psave = tc->prefix_len;
@@ -2129,7 +2152,8 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
                                         : tc->g->run_len);
             size_t sv;
             tree_path_push(tc, nm, es->v[i].name_len, &sv);
-            tree_walk(tc, depth + 1, false);
+            tree_walk(tc, depth + 1, false,
+                      needs_columns(o) ? &w : NULL);
             /* Recursion can grow the levels array; the pool's own
                buffers never move, but the struct does. */
             es = &tc->levels[depth];
@@ -2168,14 +2192,14 @@ tree_root(struct tree_ctx *tc, const struct operand *op, bool *first)
 
     struct litem it;
     operand_to_litem(op, &it);
-    struct lwidths w = { 0 };
+    struct lwidths rw = { 0 };
     if (needs_columns(o))
-        widths_add(&w, o, &it);
+        widths_add(&rw, o, &it);
     tree_prefix.bytes = NULL;
     tree_prefix.len = 0;
     tree_prefix.width = 0;
     cur_some_quoted = tc->ops_some_quoted;
-    emit_item(o, &w, &it);
+    emit_item(o, &rw, &it);
 
     size_t nlen = strlen(op->name);
     if (nlen + 1 > tc->path_cap) {
@@ -2186,7 +2210,7 @@ tree_root(struct tree_ctx *tc, const struct operand *op, bool *first)
     tc->path_len = nlen;
     tc->prefix_len = 0;
     tc->prefix_width = 0;
-    tree_walk(tc, 1, true);
+    tree_walk(tc, 1, true, needs_columns(o) ? &rw : NULL);
 }
 
 int
