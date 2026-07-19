@@ -20,12 +20,12 @@ SIMD span kernels in width and multibyte scanning, a folded-final-byte
 suffix table for color classification, and a thread pool over the
 per-entry stat phase with structurally deterministic output.
 
-Parity is enforced, not aspired to: a golden suite diffs liszt against a
-pinned GNU ls built from source - stdout, stderr, and exit codes, across
-locales, quoting styles, and terminal-dependent defaults - plus a
-differential fuzzer and syscall-budget assertions (`-U` does zero
-per-entry stats; `-l` does exactly one statx and one llistxattr per
-entry; statless color schemes stat once).
+A golden suite diffs liszt against a pinned GNU ls built from source -
+stdout, stderr, and exit codes, across locales, quoting styles, and
+terminal-dependent defaults - plus a differential fuzzer and
+syscall-budget assertions (`-U` does zero per-entry stats; `-l` does
+exactly one statx and one llistxattr per entry; statless color schemes
+stat once).
 
 ## Measured
 
@@ -53,12 +53,16 @@ Homebrew (macOS, Linuxbrew):
 
     brew install tenseleyflow/tap/liszt
 
-Arch: a `PKGBUILD` ships in `packaging/`; note that Arch's `mtools`
-package owns `/usr/bin/lz`, so the Arch package installs `liszt` and its
-man pages but not the `lz` alias (create your own
-`ln -s liszt ~/.local/bin/lz` if you don't use mtools). Release tarballs
-with checksums are on the
-[releases page](https://github.com/tenseleyFlow/liszt/releases).
+Arch, from the [AUR](https://aur.archlinux.org/packages/liszt):
+
+    paru -S liszt           # or: yay -S liszt
+
+or clone `https://aur.archlinux.org/liszt.git` and run `makepkg -si`.
+Arch's `mtools` package owns `/usr/bin/lz`, so the Arch package installs
+`liszt` and its man page but not the `lz` alias; create your own
+(`ln -s liszt ~/.local/bin/lz`) if you don't use mtools. The same
+`PKGBUILD` ships in `packaging/`. Release tarballs with checksums are on
+the [releases page](https://github.com/tenseleyFlow/liszt/releases).
 
 From source:
 
