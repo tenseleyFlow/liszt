@@ -557,6 +557,10 @@ bytes_radix_range(struct liszt_entries *es, struct liszt_entry *v,
                   struct liszt_entry *aux, size_t lo, size_t hi,
                   size_t depth)
 {
+    /* Group ranges from the dirs-first split can be empty. */
+    if (hi - lo < 2)
+        return;
+
     /* Skip the range's common prefix in one scan (rank's LCP jump). */
     for (;;) {
         size_t b0 = byte_bucket(es, &v[lo], depth);
@@ -679,6 +683,9 @@ static void
 x_radix_range(struct xrec *v, struct xrec *aux, size_t lo, size_t hi,
               size_t depth)
 {
+    if (hi - lo < 2)
+        return;
+
     for (;;) {
         size_t b0 = x_bucket(&v[lo], depth);
         if (b0 == 0)

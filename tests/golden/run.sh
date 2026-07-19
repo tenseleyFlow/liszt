@@ -330,6 +330,13 @@ run_case 2 "group dirs first" C 0 -- -1a --group-directories-first "$fix/links"
 run_case 2 "group dirs -r" C 0 -- -1ar --group-directories-first "$fix/links"
 run_case 2 "group with -U disabled" C 0 -- -1aU --group-directories-first "$fix/links"
 run_case 2 "group with -S" C 0 -- -1aS --group-directories-first "$fix/links"
+# The dirs-first split can leave a group range empty: an empty dir with
+# -a is dot-dirs only (no files range), a dotless all-file listing has
+# no dirs range. Both radix engines must tolerate the empty range.
+run_case 2 "group empty dir -a" C 0 -- -1a --group-directories-first "$work/empty"
+run_case 2 "group empty dir -a utf8" "$U8" 0 -- -1a --group-directories-first "$work/empty"
+run_case 2 "group all-files no dirs" C 0 -- -1 --group-directories-first "$fix/plain"
+run_case 2 "group empty dir -aS" C 0 -- -1aS --group-directories-first "$work/empty"
 run_case 2 "sorted operands mix" C 2 -- -1 "$fix/times/recent-a" "$work/nope" "$fix/plain" "$fix/times/old-a"
 run_case 2 "size-sorted operands" C 0 -- -1S "$fix/sizes/sz512" "$fix/sizes/sz1" "$fix/sizes/sz65536"
 run_case_pin911 2 "sort word invalid" C 1 -- --sort=bogus
@@ -596,6 +603,9 @@ run_case 6 "-L classify" C 1 -- -LF1a "$fix/links"
 run_case 6 "explicit cl-symlink-to-dir" C 0 -- -1 --dereference-command-line-symlink-to-dir "$fix/links/gooddir"
 run_case_color "$DEFCOLORS" 6 "-R color" C 0 -- -R1 --color=always "$fix/links"
 run_case_color "$DEFCOLORS" 6 "-L color links" C - -- -L1a --color=always "$fix/links"
+# Fuzz trial 20 shape: second operand is an empty dir, so grouping with
+# -a leaves the transformed engine's files range empty (was a crash).
+run_case_color "$DEFCOLORS" 6 "group -C color empty operand" "$U8" 0 -- --group-directories-first -C -w 42 --color=always -a "$fix/links" "$work/empty"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
