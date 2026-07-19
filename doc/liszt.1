@@ -95,6 +95,49 @@ stat-less listing plan is preserved. Not combinable with
 .B \-\-dired
 (positional last-wins, like
 .BR \-\-hyperlink ).
+.TP
+.B \-\-tree
+List directory contents as a tree. Implies recursion; the format is
+one-per-line unless
+.B \-l
+is active (metadata on the left, branch glyphs in the name column).
+The full sort, ignore, and grouping surface applies to each sibling
+list;
+.B \-d
+wins (no tree);
+.B \-\-dired
+self-disables. Symbolic links are shown but not descended unless
+.B \-L
+is given; directory cycles are always detected (exit status 2). One
+directory descriptor is open at any moment, at any depth, so deep or
+huge trees cannot exhaust descriptors. Unreadable subdirectories are
+diagnosed and skipped (exit status 1).
+.TP
+.BI \-\-level= N
+Descend at most
+.I N
+levels (entries directly in each operand are level 1). Directories at
+the boundary are shown, styled, and never entered. 0 or absent means
+unlimited. Requires
+.BR \-\-tree .
+.TP
+.BI \-\-tree\-limit= N
+Show at most
+.I N
+entries per directory, applied after sorting; the rest collapse into a
+final "... \fIK\fP more" line (plain bytes: no color, indicator, or
+icon). Entries hidden by the cap are not descended. 0 or absent means
+uncapped. Requires
+.BR \-\-tree .
+.TP
+.BI \-\-tree\-glyphs= WORD
+Branch glyph charset:
+.BR unicode ,
+.BR ascii ,
+or
+.B auto
+(the default: unicode when the locale codeset is UTF-8). Requires
+.BR \-\-tree .
 .SH ENVIRONMENT
 The GNU-compatible variables
 .BR LS_COLORS ,

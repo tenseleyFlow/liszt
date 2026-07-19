@@ -387,6 +387,11 @@ print_help(void)
     printf("Extensions (exact spelling, off by default; see liszt(1)):\n");
     printf("      --icons[=WHEN]      Nerd-Font icons (always, auto, never);\n");
     printf("                          LS_ICONS overrides, LISZT_ICON_SPACING\n");
+    printf("      --tree              list contents as a tree (implies recursion;\n");
+    printf("                          one-per-line unless -l)\n");
+    printf("      --level=N           descend at most N levels (0 = unlimited)\n");
+    printf("      --tree-limit=N      at most N entries per dir, then '... K more'\n");
+    printf("      --tree-glyphs=WORD  unicode, ascii, or auto (locale codeset)\n");
     exit(LISZT_STATUS_OK);
 }
 

@@ -12,6 +12,11 @@ Extension lanes (v0.2, dev box, 100k flat, 20 runs):
 - icons cost: -1 20.2 -> 21.9ms (+8.4%); --color -1 34.0 -> 35.8ms
   (+5.3%, at the 5% gate). vs eza --icons --color -1: 182.2ms ->
   liszt 5.1x faster. GNU-parity matrix re-run: no lane regressed.
+- tree (100k-node nested fixture, 1100 dirs, 10 runs): --tree 14.2ms
+  vs -R -1 13.4ms (self-relative ratio 1.057, gate 1.15); --tree -l
+  150.9ms; eza -T 230.2ms -> liszt 16.2x faster. fd ceiling: identical
+  output under ulimit -n 16 (one dirfd at any depth). GNU-parity
+  matrix re-run: no lane regressed.
 
 Closed entries:
 - macOS -l 100k: was 286ms uncapped-pool vs gls 239ms (E-core
