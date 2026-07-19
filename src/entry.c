@@ -43,6 +43,7 @@ liszt_entries_ensure_meta(struct liszt_entries *es)
     memset(es->meta, 0, es->len * sizeof *es->meta);
     for (size_t i = 0; i < es->len; i++) {
         es->meta[i].link_off = UINT32_MAX;
+        es->meta[i].abs_off = UINT32_MAX;
         es->meta[i].quoted_off = UINT32_MAX;
     }
 }

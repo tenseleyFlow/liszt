@@ -81,6 +81,7 @@ struct liszt_options {
     size_t tabsize;
     enum liszt_qstyle quoting_style;
     bool print_with_color;
+    bool print_hyperlink;
     enum liszt_indicator_style indicator_style;
     bool qmark_funny_chars;
     bool align_variable_outer_quotes;

@@ -158,6 +158,7 @@ struct staging {
     int quoting_style_opt;          /* -1 unset */
     int eolbyte;                    /* '\n'; --zero stages 0 */
     bool dired;                     /* -D seen */
+    bool print_hyperlink;           /* resolved WHEN, positional */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -420,8 +421,18 @@ handle(int key, const char *value, const char *display, struct staging *st)
         /* GNU: -D stages long format and drops --hyperlink; both are
            positional, later options re-override. */
         st->format_opt = LISZT_FMT_LONG;
+        st->print_hyperlink = false;
         st->dired = true;
         break;
+    case KEY_HYPERLINK: {
+        int v = WHEN_ALWAYS;
+        if (value)
+            v = argmatch_die("--hyperlink", value, when_words, when_vals,
+                             N_WHEN_WORDS);
+        st->print_hyperlink = v == WHEN_ALWAYS
+            || (v == WHEN_IF_TTY && isatty(STDOUT_FILENO));
+        break;
+    }
     case KEY_ZERO:
         /* GNU's staging effects are positional last-wins: a later -l,
            -q, -Q, -C or --color re-overrides the individual pieces. */
@@ -788,6 +799,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .quoting_style_opt = -1,
         .eolbyte = '\n',
         .dired = false,
+        .print_hyperlink = false,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -875,7 +887,9 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     /* --dired implies long format; silently self-disables if a later
        format word overrode that (GNU: dired &= format == long). The
        --zero clash is fatal only when dired survives. */
-    o->dired = st.dired && o->format == LISZT_FMT_LONG;
+    o->print_hyperlink = st.print_hyperlink;
+    o->dired = st.dired && o->format == LISZT_FMT_LONG
+        && !o->print_hyperlink;
     if (o->eolbyte == 0 && o->dired)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
                   "--dired and --zero are incompatible");

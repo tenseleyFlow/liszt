@@ -29,6 +29,8 @@ struct liszt_entrymeta {
     mode_t linkmode;        /* symlink target mode (grouping, -l ind.) */
     uint32_t link_off;      /* readlink target in the arena; UINT32_MAX
                                = none/unread */
+    uint32_t abs_off;       /* --hyperlink canonical path in the arena;
+                               UINT32_MAX = none/failed */
     /* Decoration slots (sprint 04): quoted display form and width,
        computed at most once per entry. quoted_off == UINT32_MAX means
        the raw name IS the display form. */

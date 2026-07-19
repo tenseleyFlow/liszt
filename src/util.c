@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 const char *liszt_prog = "liszt";
 const char *liszt_argv0 = "liszt";
@@ -246,4 +247,127 @@ liszt_strncasecmp_c(const char *a, const char *b, size_t n)
             return 0;
     }
     return 0;
+}
+
+/* --- canonicalize (gnulib CAN_MISSING subset) ------------------------- */
+
+static int
+canon_append(char **out, size_t *len, size_t *cap, const char *s, size_t n)
+{
+    if (*len + n + 1 > *cap) {
+        size_t c = *cap ? *cap : 128;
+        while (c < *len + n + 1)
+            c += c / 2;
+        *out = liszt_xrealloc(*out, c);
+        *cap = c;
+    }
+    memcpy(*out + *len, s, n);
+    *len += n;
+    (*out)[*len] = '\0';
+    return 0;
+}
+
+char *
+liszt_canonicalize_missing(const char *name)
+{
+    char *out = NULL;
+    size_t outlen = 0, outcap = 0;
+    char *rest_own = NULL;
+    const char *rest = name;
+    long maxloop = sysconf(_SC_SYMLOOP_MAX);
+    long loops = 0;
+
+    if (maxloop <= 0)
+        maxloop = 40;   /* glibc __eloop_threshold floor */
+
+    if (name[0] != '/') {
+        char cwd[4096];
+        if (!getcwd(cwd, sizeof cwd)) {
+            free(out);
+            return NULL;
+        }
+        canon_append(&out, &outlen, &outcap, cwd, strlen(cwd));
+    }
+    /* Root spelled explicitly so "" prefixes concatenate cleanly. */
+    if (outlen == 0)
+        canon_append(&out, &outlen, &outcap, "", 0);
+
+    while (*rest) {
+        while (*rest == '/')
+            rest++;
+        if (!*rest)
+            break;
+        const char *start = rest;
+        while (*rest && *rest != '/')
+            rest++;
+        size_t clen = (size_t)(rest - start);
+
+        if (clen == 1 && start[0] == '.')
+            continue;
+        if (clen == 2 && start[0] == '.' && start[1] == '.') {
+            while (outlen > 0 && out[outlen - 1] != '/')
+                outlen--;
+            if (outlen > 0)
+                outlen--;
+            out[outlen] = '\0';
+            continue;
+        }
+
+        size_t prev = outlen;
+        canon_append(&out, &outlen, &outcap, "/", 1);
+        canon_append(&out, &outlen, &outcap, start, clen);
+
+        char tbuf[4096];
+        ssize_t tn = readlink(out, tbuf, sizeof tbuf - 1);
+        if (tn < 0) {
+            if (errno == EINVAL || errno == ENOENT || errno == ENOTDIR)
+                continue;       /* not a symlink, or missing: keep */
+            free(out);
+            free(rest_own);
+            return NULL;
+        }
+        tbuf[tn] = '\0';
+        if (++loops > maxloop) {
+            free(out);
+            free(rest_own);
+            errno = ELOOP;
+            return NULL;
+        }
+        /* Splice target + remaining suffix into a fresh rest buffer. */
+        size_t restlen = strlen(rest);
+        char *nr = liszt_xmalloc((size_t)tn + 1 + restlen + 1);
+        memcpy(nr, tbuf, (size_t)tn);
+        nr[tn] = '/';
+        memcpy(nr + tn + 1, rest, restlen + 1);
+        free(rest_own);
+        rest_own = nr;
+        rest = nr;
+        if (tbuf[0] == '/') {
+            outlen = 0;
+            out[0] = '\0';
+        } else {
+            outlen = prev;
+            out[outlen] = '\0';
+        }
+    }
+
+    if (outlen == 0)
+        canon_append(&out, &outlen, &outcap, "/", 1);
+    free(rest_own);
+    return out;
+}
+
+const char *
+liszt_hostname(void)
+{
+    static char buf[256];
+    static bool have;
+
+    if (!have) {
+        if (gethostname(buf, sizeof buf - 1) != 0)
+            buf[0] = '\0';
+        buf[sizeof buf - 1] = '\0';
+        have = true;
+    }
+    return buf;
 }

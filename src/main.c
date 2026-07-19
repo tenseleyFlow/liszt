@@ -112,6 +112,59 @@ quote_f(const char *name)
     return quote_style(name, LISZT_QS_SHELL_ESCAPE);
 }
 
+/* GNU file_escape: RFC3986 unreserved set (alnum + ~-._) passes, path
+   mode keeps slashes, everything else lowercase %xx. */
+static char *
+file_escape(const char *str, bool path)
+{
+    size_t n = strlen(str);
+    char *esc = liszt_xmalloc(3 * n + 1);
+    char *p = esc;
+
+    for (; *str; str++) {
+        unsigned char b = (unsigned char)*str;
+        if (path && b == '/')
+            *p++ = '/';
+        else if ((b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z')
+                 || (b >= 'a' && b <= 'z') || b == '~' || b == '-'
+                 || b == '.' || b == '_')
+            *p++ = (char)b;
+        else
+            p += sprintf(p, "%%%02x", b);
+    }
+    *p = '\0';
+    return esc;
+}
+
+/* OSC 8 open/close around a name; escape bytes never reach dired
+   offsets (dired disables hyperlink, but count them uncounted anyway). */
+static void
+hyperlink_open(const char *absolute_name)
+{
+    char *h = file_escape(liszt_hostname(), false);
+    char *n = file_escape(absolute_name, true);
+    off_t before = liszt_emit_total();
+
+    liszt_emit_str("\033]8;;file://");
+    liszt_emit_str(h);
+    if (n[0] != '/')
+        liszt_emit_byte('/');
+    liszt_emit_str(n);
+    liszt_emit_str("\033\\");
+    dired_escapes_extra += liszt_emit_total() - before;
+    free(h);
+    free(n);
+}
+
+static void
+hyperlink_close(void)
+{
+    off_t before = liszt_emit_total();
+
+    liszt_emit_str("\033]8;;\033\\");
+    dired_escapes_extra += liszt_emit_total() - before;
+}
+
 static void
 file_failure(bool serious, const char *fmt_with_name, const char *name,
              int errnum)
@@ -149,6 +202,7 @@ struct litem {
     int width;                  /* display width, no pad */
     const struct liszt_statinfo *st;
     const char *linkname;       /* NULL = none */
+    const char *absolute_name;  /* --hyperlink canonical path or NULL */
     mode_t linkmode;
     enum liszt_ftype ftype;
     unsigned char stat_ok;
@@ -308,11 +362,28 @@ emit_name_colored(const struct litem *it, bool symlink_target,
         liszt_emit_byte(' ');
     if (color)
         liszt_color_start(color);
+    /* Hyperlink: outer quote outside the OSC 8 escape when alignment
+       quoting is on (GNU skip_quotes), so links line up. */
+    bool skip_quotes = false;
+    if (it->absolute_name) {
+        if (cur_opts->align_variable_outer_quotes && cur_some_quoted
+            && !padded) {
+            skip_quotes = true;
+            liszt_emit_byte(bytes[0]);
+        }
+        hyperlink_open(it->absolute_name);
+    }
     if (dired_on && !symlink_target)
         dired_push(&dired_names);
-    liszt_emit_bytes(bytes, blen);
+    liszt_emit_bytes(bytes + (skip_quotes ? 1 : 0),
+                     blen - (skip_quotes ? 2 : 0));
     if (dired_on && !symlink_target)
         dired_push(&dired_names);
+    if (it->absolute_name) {
+        hyperlink_close();
+        if (skip_quotes)
+            liszt_emit_byte(bytes[blen - 1]);
+    }
     if (used_this) {
         liszt_color_prep_non_filename();
         if (cur_opts->line_length
@@ -584,6 +655,7 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
 
 struct operand {
     const char *name;
+    char *absolute_name;        /* --hyperlink canonical path or NULL */
     char *qname;                /* malloc'd display form, or NULL = raw */
     size_t qlen;
     int disp_width;
@@ -657,6 +729,7 @@ static void
 operand_to_litem(const struct operand *op, struct litem *it)
 {
     it->name = op->name;
+    it->absolute_name = op->absolute_name;
     it->qname = op->qname ? op->qname : op->name;
     it->qlen = op->qname ? op->qlen : strlen(op->name);
     it->width = op->disp_width;
@@ -726,6 +799,11 @@ classify_operand(const char *name, const struct liszt_options *o,
     int err;
 
     memset(out, 0, sizeof *out);
+    if (o->print_hyperlink) {
+        out->absolute_name = liszt_canonicalize_missing(name);
+        if (!out->absolute_name)
+            file_failure(true, "error canonicalizing %s", name, errno);
+    }
     switch (o->deref) {
     case LISZT_DEREF_ALWAYS:
     case LISZT_DEREF_COMMAND_LINE_ARGUMENTS:
@@ -865,7 +943,7 @@ fill_meta(const char *dirname, const struct liszt_options *o,
     bool group = o->group_directories_first && o->sort != LISZT_SORT_NONE;
     bool any = plan.needs_stat || group || plan.stat_dirs_for_color
         || plan.stat_exec || plan.stat_links || plan.needs_link_target
-        || plan.needs_xattr || plan.cap_probe;
+        || plan.needs_xattr || plan.cap_probe || o->print_hyperlink;
 
     if (!any)
         return;
@@ -876,6 +954,20 @@ fill_meta(const char *dirname, const struct liszt_options *o,
         struct liszt_entrymeta *m = &es->meta[e->meta_idx];
         const char *nm = liszt_entry_name(es, e);
         enum liszt_ftype t = e->ftype;
+
+        /* GNU gobble_file canonicalizes before the stat, per file. */
+        if (o->print_hyperlink) {
+            char *abs =
+                liszt_canonicalize_missing(liszt_join_path(dirname, nm));
+            if (abs) {
+                m->abs_off = liszt_entries_add_bytes(es, abs, strlen(abs));
+                free(abs);
+                nm = liszt_entry_name(es, e);   /* arena may have moved */
+            } else {
+                file_failure(false, "error canonicalizing %s",
+                             liszt_join_path(dirname, nm), errno);
+            }
+        }
 
         bool check_stat = plan.needs_stat
             || (group && t == LISZT_T_UNKNOWN)
@@ -956,6 +1048,9 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
     it->st = m ? &m->st : &zero_st;
     it->linkname = (m && m->link_off != UINT32_MAX)
         ? (const char *)es->arena + m->link_off
+        : NULL;
+    it->absolute_name = (m && m->abs_off != UINT32_MAX)
+        ? (const char *)es->arena + m->abs_off
         : NULL;
     it->linkmode = m ? m->linkmode : 0;
     it->ftype = e->ftype;
@@ -1202,14 +1297,27 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
         bool hquoted;
         if (dired_on)
             liszt_emit_str("  ");
+        char *habs = NULL;
+        if (o->print_hyperlink) {
+            habs = liszt_canonicalize_missing(name);
+            if (!habs)
+                file_failure(command_line, "error canonicalizing %s",
+                             name, errno);
+        }
         const char *hq = liszt_quote_name(name, &o->dirname_qopts,
                                           o->qmark_funny_chars, false,
                                           &hlen, &hwidth, &hquoted);
+        if (habs)
+            hyperlink_open(habs);
         if (dired_on)
             dired_push(&dired_subdirs);
         liszt_emit_bytes(hq, hlen);
         if (dired_on)
             dired_push(&dired_subdirs);
+        if (habs) {
+            hyperlink_close();
+            free(habs);
+        }
         liszt_emit_str(":\n");
     }
 

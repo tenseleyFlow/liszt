@@ -46,6 +46,14 @@ const char *liszt_quote_diag(const char *name);
 /* "Try 'ARGV0 --help' for more information." to stderr. The _die form
    exits 2 (getopt-layer). argmatch-layer errors print the same line but
    exit 1 - GNU's exit_failure default, pinned against 9.11. */
+/* gnulib canonicalize_filename_mode(name, CAN_MISSING): every symlink
+   resolved, missing components kept literally, NULL+errno on symlink
+   loops or read errors. Malloc'd result. */
+char *liszt_canonicalize_missing(const char *name);
+
+/* Cached gethostname; "" when unobtainable (GNU xgethostname use). */
+const char *liszt_hostname(void);
+
 void liszt_try_help_print(void);
 _Noreturn void liszt_try_help_and_die(void);
 
