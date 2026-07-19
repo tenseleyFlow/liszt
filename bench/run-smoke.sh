@@ -71,6 +71,11 @@ if [ -n "$utf8_locale" ]; then
         "env LC_ALL=$utf8_locale $oracle $fixture" \
         "env LC_ALL=$utf8_locale $oracle -l $fixture"
 fi
+# Enumeration floor: liszt's first functional lane (sprint 01).
+row_names="$row_names oracle_u1_C liszt_u1_C"
+set -- "$@" \
+    "env LC_ALL=C $oracle -U -1 $fixture" \
+    "env LC_ALL=C ./liszt -U -1 $fixture"
 row_names="$row_names liszt_startup"
 set -- "$@" "./liszt --version"
 
