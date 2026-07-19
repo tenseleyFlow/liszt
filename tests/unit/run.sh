@@ -58,9 +58,10 @@ printf 'x\n' > "$udir/aa"
 printf 'x\n' > "$udir/.dot"
 check_status "-U1 lists a directory" 0 ./liszt -U1 "$udir"
 check_status "permuted options accepted" 0 ./liszt "$udir" -U1
-n_default=$(./liszt -U1 "$udir" | wc -l)
-n_all=$(./liszt -Ua1 "$udir" | wc -l)
-n_almost=$(./liszt -UA1 "$udir" | wc -l)
+# $(( )) normalizes BSD wc's space-padded output.
+n_default=$(( $(./liszt -U1 "$udir" | wc -l) ))
+n_all=$(( $(./liszt -Ua1 "$udir" | wc -l) ))
+n_almost=$(( $(./liszt -UA1 "$udir" | wc -l) ))
 check_eq "-a adds . .. and dotfiles" "$((n_default + 3))" "$n_all"
 check_eq "-A adds dotfiles only" "$((n_default + 1))" "$n_almost"
 fmt_out=$(./liszt -U --format=single-column "$udir")
