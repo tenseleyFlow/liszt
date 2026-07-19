@@ -835,10 +835,12 @@ fetch_scontext(const char *dir, const char *name, bool follow)
         }
         return NULL;
     }
-    if (cn < 0 && errno != ENOTSUP && errno != ENODATA
-        && errno != EOPNOTSUPP
+    if (cn < 0 && errno != ENOTSUP && errno != EOPNOTSUPP
+#ifdef ENODATA
+        && errno != ENODATA     /* Linux's missing-attribute errno */
+#endif
 #ifdef ENOATTR
-        && errno != ENOATTR     /* Darwin's missing-attribute errno */
+        && errno != ENOATTR     /* BSD's missing-attribute errno */
 #endif
         )
         fprintf(stderr, "%s: %s: %s\n", liszt_prog,
