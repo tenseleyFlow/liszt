@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [trunk]
+    tags: ['v*']
+  pull_request:
+    branches: [trunk]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install GNU coreutils oracle (macOS)
+        if: runner.os == 'macOS'
+        run: brew install coreutils
+      - run: ./configure
+      - run: make
+      - run: make check
+      - run: make sanitize
+
+  alpine:
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      # build-base gives gcc/make against musl; coreutils provides the GNU
+      # oracle (busybox ls is never an oracle). No sanitize: musl has no ASan.
+      - run: apk add build-base bash grep sed coreutils
+      - run: ./configure
+      - run: make
+      - run: make check
+
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y gmake coreutils
+          run: |
+            ./configure
+            gmake
+            gmake check
