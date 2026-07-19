@@ -80,14 +80,21 @@ cached_wcwidth(wchar_t wc)
 static int
 cached_iswprint(wchar_t wc)
 {
-#if !LISZT_REPLACE_WCWIDTH
-    /* Libc wcwidth >= 0 implies printable here; the uniwidth backend
-       has no such invariant (unassigned code points get width 1), so
-       replaced platforms always ask iswprint. */
-    if (cached_wcwidth(wc) >= 0)
-        return 1;
-#endif
-    return iswprint((wint_t)wc);
+    static signed char *tab;    /* iswprint + 1, 0 = unfilled */
+
+    /* Printability mirrors c32isprint, which dispatches to libc
+       iswprint on glibc and BSD alike - never derive it from width:
+       Darwin's wcwidth(ZWJ) is 0 while its iswprint says no, and the
+       uniwidth backend gives unassigned code points width 1. */
+    if ((unsigned long)wc >= 0x10000ul)
+        return iswprint((wint_t)wc);
+    if (!tab) {
+        tab = liszt_xmalloc(0x10000);
+        memset(tab, 0, 0x10000);
+    }
+    if (tab[wc] == 0)
+        tab[wc] = (signed char)(iswprint((wint_t)wc) ? 2 : 1);
+    return tab[wc] - 1;
 }
 
 /* gettext_quote reduced: no message catalogs; UTF-8 locales get curly
