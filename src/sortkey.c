@@ -312,7 +312,7 @@ item_cmp(const struct liszt_item *a, const struct liszt_item *b)
             diff = name_coll(a->name, b->name);
         break;
     case LISZT_SORT_TIME:
-        diff = timespec_cmp(b->mtime, a->mtime);
+        diff = timespec_cmp(b->time, a->time);
         if (diff == 0)
             diff = name_coll(a->name, b->name);
         break;
@@ -339,7 +339,7 @@ make_item(const struct liszt_entry *e, struct liszt_item *out)
         cur_es->meta ? &cur_es->meta[e->meta_idx] : NULL;
     out->name = liszt_entry_name(cur_es, e);
     out->size = m ? m->st.size : 0;
-    out->mtime = m ? m->st.mtime : (struct timespec){ 0, 0 };
+    out->time = m ? m->st.time : (struct timespec){ 0, 0 };
     out->width = m ? m->disp_width + m->padded : 0;
     out->group_dir = e->ftype == LISZT_T_DIR
         || (m && (S_ISDIR(m->st.mode) || S_ISDIR(m->linkmode)));
@@ -889,8 +889,8 @@ numeric_sort_range(struct liszt_entries *es, struct liszt_entry *eaux,
             recs[i].k1 = ~bias64((int64_t)m->st.size);
             recs[i].k2 = 0;
         } else {
-            recs[i].k1 = ~bias64((int64_t)m->st.mtime.tv_sec);
-            recs[i].k2 = ~(uint32_t)m->st.mtime.tv_nsec;
+            recs[i].k1 = ~bias64((int64_t)m->st.time.tv_sec);
+            recs[i].k2 = ~(uint32_t)m->st.time.tv_nsec;
         }
     }
     nrec_radix(recs, aux, 0, n, 0);

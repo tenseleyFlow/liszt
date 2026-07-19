@@ -101,6 +101,20 @@ long probe(void);
 long probe(void) { struct stat st = {0}; return (long)st.st_mtimespec.tv_nsec; }
 ' && have_st_mtimespec=1
 
+have_st_birthtim=0
+try_compile st_birthtim '
+#include <sys/stat.h>
+long probe(void);
+long probe(void) { struct stat st = {0}; return (long)st.st_birthtim.tv_nsec; }
+' && have_st_birthtim=1
+
+have_st_birthtimespec=0
+try_compile st_birthtimespec '
+#include <sys/stat.h>
+long probe(void);
+long probe(void) { struct stat st = {0}; return (long)st.st_birthtimespec.tv_nsec; }
+' && have_st_birthtimespec=1
+
 case "$(uname -m)" in
 x86_64|amd64|aarch64|arm64) endian=little ;;
 *) endian=unknown ;;
@@ -119,6 +133,8 @@ cat > config.h <<EOF
 #define LISZT_HAVE_EXTATTR $have_extattr
 #define LISZT_HAVE_ST_MTIM $have_st_mtim
 #define LISZT_HAVE_ST_MTIMESPEC $have_st_mtimespec
+#define LISZT_HAVE_ST_BIRTHTIM $have_st_birthtim
+#define LISZT_HAVE_ST_BIRTHTIMESPEC $have_st_birthtimespec
 #define LISZT_ENDIAN_$endian 1
 #endif
 EOF

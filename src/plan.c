@@ -27,14 +27,14 @@ select_fetch_set(const struct liszt_options *o, struct liszt_plan *p)
             wants |= LISZT_WANT_BLOCKS;     /* total line needs blocks */
         if (long_fmt) {
             wants |= LISZT_WANT_NLINK | LISZT_WANT_SIZE
-                | LISZT_WANT_MTIME;
+                | LISZT_WANT_TIME;
             if (o->print_owner || o->print_author)
                 wants |= LISZT_WANT_UID;
             if (o->print_group)
                 wants |= LISZT_WANT_GID;
         }
         if (o->sort == LISZT_SORT_TIME)
-            wants |= LISZT_WANT_MTIME;
+            wants |= LISZT_WANT_TIME;
         if (o->sort == LISZT_SORT_SIZE)
             wants |= LISZT_WANT_SIZE;
     }

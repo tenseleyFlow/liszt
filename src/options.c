@@ -133,7 +133,8 @@ struct staging {
     bool immediate_dirs;
     bool recursive;
     int deref_opt;      /* -1 unset, else enum liszt_deref */
-    bool explicit_time; /* -c/-u seen; feeds the sort-resolution rule */
+    int time_type;      /* enum liszt_timetype; mtime unless overridden */
+    bool explicit_time; /* -c/-u/--time seen; feeds the sort rule */
     bool print_owner;
     bool print_group;
     bool print_author;
@@ -304,6 +305,34 @@ handle(int key, const char *value, const char *display, struct staging *st)
     case 't':
         st->sort_opt = LISZT_SORT_TIME;
         break;
+    case 'c':
+        st->time_type = LISZT_TIME_CTIME;
+        st->explicit_time = true;
+        break;
+    case 'u':
+        st->time_type = LISZT_TIME_ATIME;
+        st->explicit_time = true;
+        break;
+    case KEY_TIME: {
+        /* GNU time_args order: three atime synonyms, two ctime, two
+           mtime, two btime. */
+        static const char *const time_words[] = {
+            "atime", "access", "use",
+            "ctime", "status",
+            "mtime", "modification",
+            "birth", "creation"
+        };
+        static const int vals[] = {
+            LISZT_TIME_ATIME, LISZT_TIME_ATIME, LISZT_TIME_ATIME,
+            LISZT_TIME_CTIME, LISZT_TIME_CTIME,
+            LISZT_TIME_MTIME, LISZT_TIME_MTIME,
+            LISZT_TIME_BTIME, LISZT_TIME_BTIME
+        };
+        st->time_type = argmatch_die("--time", value, time_words, vals,
+                                     (int)(sizeof vals / sizeof vals[0]));
+        st->explicit_time = true;
+        break;
+    }
     case 'v':
         st->sort_opt = LISZT_SORT_VERSION;
         break;
@@ -637,6 +666,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .immediate_dirs = false,
         .recursive = false,
         .deref_opt = -1,
+        .time_type = LISZT_TIME_MTIME,
         .explicit_time = false,
         .print_owner = true,
         .print_group = true,
@@ -734,6 +764,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         o->sort = LISZT_SORT_TIME;
     else
         o->sort = LISZT_SORT_NAME;
+    o->time_type = (enum liszt_timetype)st.time_type;
     if (st.deref_opt >= 0)
         o->deref = (enum liszt_deref)st.deref_opt;
     else

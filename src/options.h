@@ -7,6 +7,7 @@
 
 #include "dirread.h"
 #include "quote.h"
+#include "sys/xstat.h"
 
 /* Values mirror GNU ls's enums where order matters (format/sort words). */
 enum liszt_format {
@@ -45,6 +46,7 @@ enum liszt_deref {
 struct liszt_options {
     enum liszt_format format;
     enum liszt_sortword sort;
+    enum liszt_timetype time_type;
     enum liszt_ignore_mode ignore;
     enum liszt_deref deref;
     bool reverse;

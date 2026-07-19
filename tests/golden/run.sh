@@ -607,6 +607,34 @@ run_case_color "$DEFCOLORS" 6 "-L color links" C - -- -L1a --color=always "$fix/
 # -a leaves the transformed engine's files range empty (was a crash).
 run_case_color "$DEFCOLORS" 6 "group -C color empty operand" "$U8" 0 -- --group-directories-first -C -w 42 --color=always -a "$fix/links" "$work/empty"
 
+# 07: time selection. Atimes are settable (touch -a -d) so that family
+# gets a controlled fixture with one recent-side value; ctime/btime are
+# not settable, but parity needs only that both tools read the same
+# inode - order and rendering must still agree byte-for-byte.
+mkdir -p "$work/atimes"
+for f in aold amid anew; do printf 'x\n' > "$work/atimes/$f"; done
+touch -d "2020-03-01T00:00:00Z" "$work/atimes/aold" "$work/atimes/amid" "$work/atimes/anew"
+touch -a -d "2019-01-01T00:00:00Z" "$work/atimes/aold"
+touch -a -d "2021-06-01T00:00:00Z" "$work/atimes/amid"
+touch -a -d "$(date -u +%Y-%m-%d)T00:00:00Z" "$work/atimes/anew"
+run_case 7 "-u sorts by atime" C 0 -- -1u "$work/atimes"
+run_case 7 "-u reverse" C 0 -- -1ur "$work/atimes"
+run_case 7 "-lu displays atime sorts name" C 0 -- -lu "$work/atimes"
+run_case 7 "-lu utf8" "$U8" 0 -- -lu "$work/atimes"
+run_case 7 "-ltu sorts by atime" C 0 -- -ltu "$work/atimes"
+run_case 7 "time word access" C 0 -- -1 --time=access "$work/atimes"
+run_case 7 "time word use" C 0 -- -1 --time=use "$work/atimes"
+run_case 7 "-c sorts by ctime" C 0 -- -1c "$fix/times"
+run_case 7 "-lc displays ctime" C 0 -- -lc "$fix/times"
+run_case 7 "-ltc sorts by ctime" C 0 -- -ltc "$fix/times"
+run_case 7 "time word status" C 0 -- -1 --time=status "$fix/times"
+run_case 7 "time word modification" C 0 -- -lt --time=modification "$fix/times"
+run_case 7 "last of -cu wins" C 0 -- -1cu "$work/atimes"
+run_case 7 "-t with -c sorts ctime" C 0 -- -1tc "$fix/times"
+run_case_pin911 7 "time word birth long" C 0 -- -l --time=birth "$fix/times"
+run_case_pin911 7 "time word creation sort" C 0 -- -1 --time=creation "$fix/times"
+run_case_pin911 7 "time word invalid" C 1 -- --time=bogus
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

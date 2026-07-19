@@ -6,6 +6,16 @@
 #include <sys/types.h>
 #include <time.h>
 
+/* Which timestamp -c/-u/--time selected. Values mirror GNU's enum
+   time_type (ls.c); the module-level setting below plays the role of
+   GNU's global in calc_req_mask and do_statx. */
+enum liszt_timetype {
+    LISZT_TIME_MTIME = 0,
+    LISZT_TIME_CTIME,
+    LISZT_TIME_ATIME,
+    LISZT_TIME_BTIME
+};
+
 /* The single metadata contract: every backend (statx, lstat fallback)
    fills every field the WANTS mask names; renderers read only this
    struct. The mask exists so statx requests only what the plan derived
@@ -17,12 +27,19 @@ struct liszt_statinfo {
     uid_t uid;
     gid_t gid;
     off_t size;
-    struct timespec mtime;
+    struct timespec time;   /* the SELECTED timestamp (see
+                               liszt_xstat_time_type); GNU stores btime
+                               in st_mtim the same way. (-1,-1) = birth
+                               time requested but unavailable. */
     blkcnt_t blocks;    /* 512-byte units (ST_NBLOCKSIZE) */
     ino_t ino;
     dev_t dev;
     dev_t rdev;
 };
+
+/* Set once after options resolution, before any stat call. Every
+   backend then fetches and stores that timestamp in .time. */
+void liszt_xstat_time_type(enum liszt_timetype t);
 
 enum {
     LISZT_WANT_MODE = 1 << 0,
@@ -30,7 +47,7 @@ enum {
     LISZT_WANT_UID = 1 << 2,
     LISZT_WANT_GID = 1 << 3,
     LISZT_WANT_SIZE = 1 << 4,
-    LISZT_WANT_MTIME = 1 << 5,
+    LISZT_WANT_TIME = 1 << 5,   /* the selected timestamp */
     LISZT_WANT_BLOCKS = 1 << 6,
     LISZT_WANT_INO = 1 << 7
 };

@@ -23,6 +23,16 @@
 static char *pathbuf;
 static size_t pathbuf_cap;
 
+/* Which timestamp .time carries, set once before any stat (GNU's
+   global time_type consulted by calc_req_mask and do_statx). */
+static enum liszt_timetype time_type = LISZT_TIME_MTIME;
+
+void
+liszt_xstat_time_type(enum liszt_timetype t)
+{
+    time_type = t;
+}
+
 const char *
 liszt_join_path(const char *dir, const char *name)
 {
@@ -66,8 +76,13 @@ statx_mask(unsigned wants)
         mask |= STATX_GID;
     if (wants & LISZT_WANT_SIZE)
         mask |= STATX_SIZE;
-    if (wants & LISZT_WANT_MTIME)
-        mask |= STATX_MTIME;
+    if (wants & LISZT_WANT_TIME)
+        switch (time_type) {
+        case LISZT_TIME_CTIME: mask |= STATX_CTIME; break;
+        case LISZT_TIME_ATIME: mask |= STATX_ATIME; break;
+        case LISZT_TIME_BTIME: mask |= STATX_BTIME; break;
+        case LISZT_TIME_MTIME: default: mask |= STATX_MTIME; break;
+        }
     if (wants & LISZT_WANT_BLOCKS)
         mask |= STATX_BLOCKS;
     if (wants & LISZT_WANT_INO)
@@ -89,8 +104,31 @@ liszt_statx_path(const char *path, unsigned wants, bool follow,
     out->uid = stx.stx_uid;
     out->gid = stx.stx_gid;
     out->size = (off_t)stx.stx_size;
-    out->mtime.tv_sec = stx.stx_mtime.tv_sec;
-    out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
+    switch (time_type) {
+    case LISZT_TIME_CTIME:
+        out->time.tv_sec = stx.stx_ctime.tv_sec;
+        out->time.tv_nsec = stx.stx_ctime.tv_nsec;
+        break;
+    case LISZT_TIME_ATIME:
+        out->time.tv_sec = stx.stx_atime.tv_sec;
+        out->time.tv_nsec = stx.stx_atime.tv_nsec;
+        break;
+    case LISZT_TIME_BTIME:
+        /* The fs may not carry birth times; GNU signals with (-1,-1). */
+        if (stx.stx_mask & STATX_BTIME) {
+            out->time.tv_sec = stx.stx_btime.tv_sec;
+            out->time.tv_nsec = stx.stx_btime.tv_nsec;
+        } else {
+            out->time.tv_sec = -1;
+            out->time.tv_nsec = -1;
+        }
+        break;
+    case LISZT_TIME_MTIME:
+    default:
+        out->time.tv_sec = stx.stx_mtime.tv_sec;
+        out->time.tv_nsec = stx.stx_mtime.tv_nsec;
+        break;
+    }
     out->blocks = (blkcnt_t)stx.stx_blocks;
     out->ino = stx.stx_ino;
     out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);
@@ -108,7 +146,29 @@ fill(const struct stat *st, struct liszt_statinfo *out)
     out->uid = st->st_uid;
     out->gid = st->st_gid;
     out->size = st->st_size;
-    out->mtime = ST_MTIMESPEC(st);
+    switch (time_type) {
+#if LISZT_HAVE_ST_MTIM
+    case LISZT_TIME_CTIME: out->time = st->st_ctim; break;
+    case LISZT_TIME_ATIME: out->time = st->st_atim; break;
+#else
+    case LISZT_TIME_CTIME: out->time = st->st_ctimespec; break;
+    case LISZT_TIME_ATIME: out->time = st->st_atimespec; break;
+#endif
+    case LISZT_TIME_BTIME:
+#if LISZT_HAVE_ST_BIRTHTIM
+        out->time = st->st_birthtim;
+#elif LISZT_HAVE_ST_BIRTHTIMESPEC
+        out->time = st->st_birthtimespec;
+#else
+        out->time.tv_sec = -1;      /* GNU's unsupported sentinel */
+        out->time.tv_nsec = -1;
+#endif
+        break;
+    case LISZT_TIME_MTIME:
+    default:
+        out->time = ST_MTIMESPEC(st);
+        break;
+    }
     out->blocks = st->st_blocks;
     out->ino = st->st_ino;
     out->dev = st->st_dev;
@@ -230,8 +290,8 @@ liszt_fstat(int fd, struct liszt_statinfo *out)
     out->uid = stx.stx_uid;
     out->gid = stx.stx_gid;
     out->size = (off_t)stx.stx_size;
-    out->mtime.tv_sec = stx.stx_mtime.tv_sec;
-    out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
+    out->time.tv_sec = stx.stx_mtime.tv_sec;
+    out->time.tv_nsec = stx.stx_mtime.tv_nsec;
     out->blocks = (blkcnt_t)stx.stx_blocks;
     out->ino = stx.stx_ino;
     out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);

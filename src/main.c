@@ -441,20 +441,26 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         prefix_len += (size_t)n;
     }
 
+    /* GNU's btime_ok: birth time selected but the fs has none - the
+       (-1,-1) sentinel renders as "?" through the fallback lane. */
+    bool btime_ok = !(o->time_type == LISZT_TIME_BTIME
+                      && st->time.tv_sec == -1 && st->time.tv_nsec == -1);
+
     char tbuf[LISZT_TIME_BUFSZ];
-    size_t tlen = it->stat_ok ? liszt_timefmt_render(tbuf, st->mtime) : 0;
+    size_t tlen = it->stat_ok && btime_ok
+        ? liszt_timefmt_render(tbuf, st->time) : 0;
     if (tlen > 0) {
         liszt_emit_bytes(tbuf, tlen);
         liszt_emit_byte(' ');
         prefix_len += tlen + 1;
     } else {
         char sbuf[32];
-        if (!it->stat_ok) {
+        if (!it->stat_ok || !btime_ok) {
             n = snprintf(buf, sizeof buf, "%*s ",
                          liszt_timefmt_expected_width(), "?");
         } else {
             snprintf(sbuf, sizeof sbuf, "%jd",
-                     (intmax_t)st->mtime.tv_sec);
+                     (intmax_t)st->time.tv_sec);
             n = snprintf(buf, sizeof buf, "%*s ",
                          liszt_timefmt_expected_width(), sbuf);
         }
@@ -545,7 +551,7 @@ operand_item(const void *p, struct liszt_item *out)
     const struct operand *op = p;
     out->name = op->name;
     out->size = op->st.size;
-    out->mtime = op->st.mtime;
+    out->time = op->st.time;
     out->width = op->disp_width + op->padded;
     /* Under -d, dir operands stay in the batch and GNU's dirs-first
        prefix groups them (fuzz-pinned); with extraction active the dirs
@@ -1165,6 +1171,7 @@ main(int argc, char **argv)
 
     liszt_options_parse(argc, argv, &o);
     cur_opts = &o;
+    liszt_xstat_time_type(o.time_type);
 
     if (o.print_with_color) {
         liszt_colors_parse(&o.print_with_color);

@@ -163,6 +163,10 @@ gen_plan() {
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
         # Long-lane extras compose with any format (frills) or -l.
+        p = rand()
+        if (p < 0.1) flags = flags " -u"
+        else if (p < 0.2) flags = flags " -c"
+        else if (p < 0.25) flags = flags " --time=birth"
         if (rand() < 0.2) flags = flags " -s"
         if (rand() < 0.2) flags = flags " -i"
         if (rand() < 0.15) flags = flags " -n"
