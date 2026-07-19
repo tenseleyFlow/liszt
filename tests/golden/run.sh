@@ -1040,6 +1040,14 @@ run_case 11 "ext guard --le unrecognized" C 2 -- --le
 run_case 14 "ext guard --no prefixes no-group" C 0 -- --no -lU1 "$fix/plain"
 run_case 14 "ext guard --git-i unrecognized" C 2 -- --git-i
 
+# 16: --color=full is exact-spelling-only; every other value reaches
+# GNU's argmatch bytes-for-bytes (f is still force, ful still invalid
+# with a listing that never mentions full).
+run_case 16 "ext guard --color=f is force" C 0 -- --color=f -U1 "$fix/plain"
+run_case 16 "ext guard --color=ful invalid" C 1 -- --color=ful
+run_case 16 "ext guard --color=fullx invalid" C 1 -- --color=fullx
+run_case 16 "ext guard --color=fu invalid" C 1 -- --color=fu
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y
