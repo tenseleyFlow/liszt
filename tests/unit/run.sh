@@ -377,6 +377,8 @@ cat > "$giwork/ixtest.c" <<'EOF'
 static int bad;
 static unsigned char img[65536];
 static size_t ilen;
+static size_t oidl = 20;
+static char prev4[4096];
 
 static void
 be32p(size_t off, unsigned v)
@@ -407,7 +409,7 @@ add_entry(unsigned version, const char *path, unsigned mode,
     be32p(start + 12, mnsec);
     be32p(start + 24, mode);
     be32p(start + 36, size);
-    size_t p = start + 40 + 20;
+    size_t p = start + 40 + oidl;
     size_t namelen = strlen(path);
     unsigned f = flags | (namelen < 0xFFF ? (unsigned)namelen : 0xFFF);
     img[p] = (unsigned char)(f >> 8);
@@ -432,8 +434,53 @@ add_entry(unsigned version, const char *path, unsigned mode,
 static void
 finish_index(void)
 {
-    memset(img + ilen, 0xAB, 20);   /* fake checksum, never verified */
-    ilen += 20;
+    memset(img + ilen, 0xAB, oidl); /* fake checksum, never verified */
+    ilen += oidl;
+}
+
+static void
+add_ext(const char *sig, size_t size)
+{
+    memcpy(img + ilen, sig, 4);
+    be32p(ilen + 4, (unsigned)size);
+    memset(img + ilen + 8, 0, size);
+    ilen += 8 + size;
+}
+
+/* v4 prefix-compressed entry: varint strip + NUL suffix, no padding. */
+static void
+add_entry_v4(const char *path, unsigned mode, unsigned size,
+             unsigned msec, unsigned flags)
+{
+    size_t start = ilen;
+    be32p(start + 8, msec);
+    be32p(start + 24, mode);
+    be32p(start + 36, size);
+    size_t p = start + 40 + oidl;
+    size_t namelen = strlen(path);
+    unsigned f = flags | (namelen < 0xFFF ? (unsigned)namelen : 0xFFF);
+    img[p] = (unsigned char)(f >> 8);
+    img[p + 1] = (unsigned char)f;
+    p += 2;
+    size_t prevlen = strlen(prev4);
+    size_t common = 0;
+    while (common < prevlen && common < namelen
+           && prev4[common] == path[common])
+        common++;
+    unsigned long long strip = prevlen - common;
+    unsigned char varint[16];
+    unsigned vpos = sizeof varint - 1;
+    varint[vpos] = strip & 127;
+    while (strip >>= 7)
+        varint[--vpos] = (unsigned char)(128 | (--strip & 127));
+    memcpy(img + p, varint + vpos, sizeof varint - vpos);
+    p += sizeof varint - vpos;
+    memcpy(img + p, path + common, namelen - common + 1);
+    p += namelen - common + 1;
+    ilen = p;
+    be32p(8, (unsigned)(img[8] << 24 | img[9] << 16 | img[10] << 8
+                        | img[11]) + 1);
+    strcpy(prev4, path);
 }
 
 static struct liszt_git_ctx c;
@@ -445,6 +492,7 @@ parse_ok(void)
     c.root = (char *)"/repo";
     c.root_len = 5;
     c.filemode = 1;
+    c.sha256 = oidl == 32;
     c.image = img;
     c.image_len = ilen;
     c.index_mtime = 99999;
@@ -606,12 +654,107 @@ main(void)
     }
     free(c.ents);
 
+    /* v4: prefix compression expands into the arena, order kept. */
+    begin_index(4);
+    prev4[0] = 0;
+    add_entry_v4("aaa/one", 0100644, 5, 1000, 0);
+    add_entry_v4("aaa/two", 0100644, 6, 1000, 0);
+    add_entry_v4("bbb", 0100644, 7, 1000, 0);
+    add_entry_v4(
+        "ccc/a-very-long-component-padding-padding-padding-padding-"
+        "padding-padding-padding-padding-padding-padding-padding-"
+        "padding-end", 0100644, 8, 1000, 0);
+    add_entry_v4("ddd", 0100644, 9, 1000, 0);
+    finish_index();
+    if (!parse_ok() || c.n_ents != 5) {
+        printf("v4 parse: degraded or wrong count\n");
+        return 1;
+    }
+    if (strcmp(c.ents[1].path, "aaa/two") != 0
+        || strcmp(c.ents[4].path, "ddd") != 0) {
+        printf("v4 expansion wrong: [%s] [%s]\n", c.ents[1].path,
+               c.ents[4].path);
+        bad = 1;
+    }
+    liszt_git_window(&c, "/repo/aaa");
+    struct liszt_git_wtstat v4ws = { 1000, 0, 6, 0100644 };
+    expect_status("v4 window clean", "two", 0, &v4ws, '-');
+    reset_ctx();
+
+    /* v4 corrupt: strip beyond the previous path must degrade. */
+    begin_index(4);
+    prev4[0] = 0;
+    add_entry_v4("abc", 0100644, 1, 1, 0);
+    img[ilen - 5] = 99;     /* strip varint: 99 > len("abc") */
+    finish_index();
+    if (parse_ok()) {
+        printf("v4 over-strip accepted\n");
+        bad = 1;
+    }
+    reset_ctx();
+
+    /* sha256 layout: 32-byte OIDs and checksum. */
+    oidl = 32;
+    begin_index(2);
+    add_entry(2, "s.txt", 0100644, 3, 500, 0, 0, 0);
+    finish_index();
+    if (!parse_ok() || c.n_ents != 1
+        || strcmp(c.ents[0].path, "s.txt") != 0) {
+        printf("sha256 layout parse failed\n");
+        return 1;
+    }
+    liszt_git_window(&c, "/repo");
+    struct liszt_git_wtstat sws = { 500, 0, 3, 0100644 };
+    expect_status("sha256 clean", "s.txt", 0, &sws, '-');
+    reset_ctx();
+    oidl = 20;
+
+    /* Extensions: optional skipped, required degrade repo-wide. */
+    begin_index(2);
+    add_entry(2, "x", 0100644, 1, 1, 0, 0, 0);
+    add_ext("TREE", 12);
+    finish_index();
+    if (!parse_ok() || c.n_ents != 1) {
+        printf("optional extension broke parse\n");
+        bad = 1;
+    }
+    reset_ctx();
+    for (int i = 0; i < 3; i++) {
+        static const char *const sigs[] = { "link", "sdir", "abcd" };
+        begin_index(2);
+        add_entry(2, "x", 0100644, 1, 1, 0, 0, 0);
+        add_ext(sigs[i], 4);
+        finish_index();
+        if (parse_ok()) {
+            printf("required extension %s accepted\n", sigs[i]);
+            bad = 1;
+        }
+        reset_ctx();
+    }
+    /* Extension size lying past the checksum. */
+    begin_index(2);
+    add_entry(2, "x", 0100644, 1, 1, 0, 0, 0);
+    add_ext("TREE", 4);
+    be32p(ilen - 8, 0xFFFF);
+    finish_index();
+    if (parse_ok()) {
+        printf("extension size overflow accepted\n");
+        bad = 1;
+    }
+    reset_ctx();
+
     if (!bad) puts("ok");
     return bad;
 }
 EOF
+# Under ASan+UBSan when the toolchain supports it (the corrupt battery
+# is pointer arithmetic all the way down); plain otherwise.
 checks=$((checks + 1))
-if cc -O2 -std=c11 -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 -I src \
+if cc -O2 -std=c11 -g -fsanitize=address,undefined \
+    -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 -I src \
+    -o "$giwork/ixtest" "$giwork/ixtest.c" \
+    src/git.c src/util.c 2>"$giwork/cc2.err" \
+|| cc -O2 -std=c11 -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 -I src \
     -o "$giwork/ixtest" "$giwork/ixtest.c" \
     src/git.c src/util.c 2>"$giwork/cc2.err"; then
     out=$("$giwork/ixtest") || note_fail "git index driver: $out"
