@@ -365,6 +365,262 @@ else
     note_fail "gitignore driver failed to compile"
 fi
 
+# Git index parser (sprint 14B): synthetic v2/v3 images built in the
+# driver - parse, sorted-order verify, status compare table, window
+# lookups, and corrupt-at-every-boundary degrades (never a crash).
+cat > "$giwork/ixtest.c" <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "git.h"
+
+static int bad;
+static unsigned char img[65536];
+static size_t ilen;
+
+static void
+be32p(size_t off, unsigned v)
+{
+    img[off] = (unsigned char)(v >> 24);
+    img[off + 1] = (unsigned char)(v >> 16);
+    img[off + 2] = (unsigned char)(v >> 8);
+    img[off + 3] = (unsigned char)v;
+}
+
+static void
+begin_index(unsigned version)
+{
+    memset(img, 0, sizeof img);
+    memcpy(img, "DIRC", 4);
+    be32p(4, version);
+    be32p(8, 0);
+    ilen = 12;
+}
+
+static void
+add_entry(unsigned version, const char *path, unsigned mode,
+          unsigned size, unsigned msec, unsigned mnsec,
+          unsigned flags, unsigned xflags)
+{
+    size_t start = ilen;
+    be32p(start + 8, msec);
+    be32p(start + 12, mnsec);
+    be32p(start + 24, mode);
+    be32p(start + 36, size);
+    size_t p = start + 40 + 20;
+    size_t namelen = strlen(path);
+    unsigned f = flags | (namelen < 0xFFF ? (unsigned)namelen : 0xFFF);
+    img[p] = (unsigned char)(f >> 8);
+    img[p + 1] = (unsigned char)f;
+    p += 2;
+    if (flags & 0x4000) {
+        img[p] = (unsigned char)(xflags >> 8);
+        img[p + 1] = (unsigned char)xflags;
+        p += 2;
+    }
+    memcpy(img + p, path, namelen + 1);
+    p += namelen + 1;
+    if (version <= 3)
+        while ((p - start) % 8)
+            img[p++] = 0;
+    ilen = p;
+    be32p(8, (unsigned)(img[8] << 24 | img[9] << 16 | img[10] << 8
+                        | img[11]) + 1);
+    (void)version;
+}
+
+static void
+finish_index(void)
+{
+    memset(img + ilen, 0xAB, 20);   /* fake checksum, never verified */
+    ilen += 20;
+}
+
+static struct liszt_git_ctx c;
+
+static int
+parse_ok(void)
+{
+    memset(&c, 0, sizeof c);
+    c.root = (char *)"/repo";
+    c.root_len = 5;
+    c.filemode = 1;
+    c.image = img;
+    c.image_len = ilen;
+    c.index_mtime = 99999;
+    return liszt_git_index_parse(&c);
+}
+
+static void
+reset_ctx(void)
+{
+    free(c.ents);
+    free(c.v4_arena);
+    free(c.win_tab);
+    memset(&c, 0, sizeof c);
+}
+
+static void
+expect_status(const char *desc, const char *name, int is_dir,
+              const struct liszt_git_wtstat *ws, int want)
+{
+    char got = liszt_git_status(&c, name, strlen(name), is_dir, ws);
+    if (got != want) {
+        printf("%s: want %c got %c\n", desc, want ? want : '0',
+               got ? got : '0');
+        bad = 1;
+    }
+}
+
+int
+main(void)
+{
+    /* v2: three clean regular files + one symlink + one subdir path. */
+    begin_index(2);
+    add_entry(2, "a.txt", 0100644, 5, 1000, 500, 0, 0);
+    add_entry(2, "lnk", 0120000, 4, 1000, 0, 0, 0);
+    add_entry(2, "sub/b.txt", 0100755, 9, 2000, 0, 0, 0);
+    add_entry(2, "zz", 0100644, 1, 3000, 0, 0, 0);
+    finish_index();
+    if (!parse_ok() || c.n_ents != 4) {
+        printf("v2 parse: degraded or wrong count\n");
+        return 1;
+    }
+    if (strcmp(c.ents[2].path, "sub/b.txt") != 0) {
+        printf("v2 paths wrong\n");
+        bad = 1;
+    }
+
+    liszt_git_window(&c, "/repo");
+    struct liszt_git_wtstat ws = { 1000, 500, 5, 0100644 };
+    expect_status("clean file", "a.txt", 0, &ws, '-');
+    ws.size = 6;
+    expect_status("size differs", "a.txt", 0, &ws, 'M');
+    ws.size = 5;
+    ws.mtime_sec = 1001;
+    expect_status("mtime sec differs", "a.txt", 0, &ws, 'M');
+    ws.mtime_sec = 1000;
+    ws.mtime_nsec = 501;
+    expect_status("nsec differs both set", "a.txt", 0, &ws, 'M');
+    ws.mtime_nsec = 0;
+    expect_status("wt zero nsec tolerated", "a.txt", 0, &ws, '-');
+    ws.mtime_nsec = 500;
+    ws.mode = 0100755;
+    expect_status("exec bit flip", "a.txt", 0, &ws, 'M');
+    c.filemode = 0;
+    expect_status("filemode=false ignores exec", "a.txt", 0, &ws, '-');
+    c.filemode = 1;
+    ws.mode = 0120000 | 0777;
+    expect_status("reg vs symlink typechange", "a.txt", 0, &ws, 'T');
+    struct liszt_git_wtstat lws = { 1000, 0, 4, 0120000 | 0777 };
+    expect_status("clean symlink", "lnk", 0, &lws, '-');
+    expect_status("tracked dir one decision", "sub", 1, NULL, '-');
+    expect_status("tracked path listed as dir", "a.txt", 1, NULL, 'T');
+    expect_status("unknown name", "nope", 0, &ws, 0);
+
+    liszt_git_window(&c, "/repo/sub");
+    struct liszt_git_wtstat bws = { 2000, 0, 9, 0100755 };
+    expect_status("subdir window clean", "b.txt", 0, &bws, '-');
+    expect_status("subdir window miss", "a.txt", 0, &ws, 0);
+    reset_ctx();
+
+    /* v3: extended flags - skip-worktree, intent-to-add, stage, valid. */
+    begin_index(3);
+    add_entry(3, "conflict", 0100644, 1, 1, 0, 0x1000, 0);
+    add_entry(3, "ita", 0100644, 0, 0, 0, 0x4000, 0x2000);
+    add_entry(3, "skipwt", 0100644, 7, 1, 0, 0x4000, 0x4000);
+    add_entry(3, "valid", 0100644, 7, 1, 0, 0x8000, 0);
+    finish_index();
+    if (!parse_ok() || c.n_ents != 4) {
+        printf("v3 parse: degraded or wrong count\n");
+        return 1;
+    }
+    liszt_git_window(&c, "/repo");
+    struct liszt_git_wtstat junk = { 42, 42, 42, 0100644 };
+    expect_status("stage bits conflict", "conflict", 0, &junk, 'U');
+    expect_status("intent-to-add", "ita", 0, &junk, 'N');
+    expect_status("skip-worktree clean", "skipwt", 0, &junk, '-');
+    expect_status("assume-unchanged clean", "valid", 0, &junk, '-');
+    reset_ctx();
+
+    /* Unsorted order must degrade (binary-search ground truth). */
+    begin_index(2);
+    add_entry(2, "zz", 0100644, 1, 1, 0, 0, 0);
+    add_entry(2, "aa", 0100644, 1, 1, 0, 0, 0);
+    finish_index();
+    if (parse_ok()) {
+        printf("unsorted index accepted\n");
+        bad = 1;
+    }
+    reset_ctx();
+
+    /* Corrupt-at-every-boundary: parse must degrade, never crash. */
+    begin_index(2);
+    add_entry(2, "a.txt", 0100644, 5, 1000, 0, 0, 0);
+    finish_index();
+    size_t good = ilen;
+    for (size_t cut = 0; cut < good; cut += 3) {
+        ilen = cut;
+        memset(&c, 0, sizeof c);
+        c.image = img;
+        c.image_len = ilen;
+        if (liszt_git_index_parse(&c) && cut < good) {
+            /* Truncations that still parse must at least keep the
+               entry table consistent. */
+            if (c.n_ents > 1) {
+                printf("truncation at %zu inflated entries\n", cut);
+                bad = 1;
+            }
+        }
+        free(c.ents);
+        free(c.v4_arena);
+    }
+    ilen = good;
+    memcpy(img, "JUNK", 4);
+    memset(&c, 0, sizeof c);
+    c.image = img;
+    c.image_len = ilen;
+    if (liszt_git_index_parse(&c)) {
+        printf("bad magic accepted\n");
+        bad = 1;
+    }
+    free(c.ents);
+    memcpy(img, "DIRC", 4);
+    be32p(4, 9);
+    memset(&c, 0, sizeof c);
+    c.image = img;
+    c.image_len = ilen;
+    if (liszt_git_index_parse(&c)) {
+        printf("version 9 accepted\n");
+        bad = 1;
+    }
+    free(c.ents);
+    be32p(4, 2);
+    be32p(8, 0xFFFFFF);
+    memset(&c, 0, sizeof c);
+    c.image = img;
+    c.image_len = ilen;
+    if (liszt_git_index_parse(&c)) {
+        printf("entry-count overflow accepted\n");
+        bad = 1;
+    }
+    free(c.ents);
+
+    if (!bad) puts("ok");
+    return bad;
+}
+EOF
+checks=$((checks + 1))
+if cc -O2 -std=c11 -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 -I src \
+    -o "$giwork/ixtest" "$giwork/ixtest.c" \
+    src/git.c src/util.c 2>"$giwork/cc2.err"; then
+    out=$("$giwork/ixtest") || note_fail "git index driver: $out"
+    [ "$out" = "ok" ] || { echo "$out" | sed -n '1,6p' >&2; }
+else
+    sed -n '1,4p' "$giwork/cc2.err" >&2
+    note_fail "git index driver failed to compile"
+fi
+
 # Makefile SRC list matches the files on disk (unwired sources fail loudly).
 listed=$(sed -n '/^SRC =/,/^$/p' Makefile | grep -o 'src/[a-z_/]*\.c' | sort)
 ondisk=$(ls src/*.c src/sys/*.c | sort)

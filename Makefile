@@ -20,6 +20,7 @@ SRC = \
 	src/colors.c \
 	src/icons.c \
 	src/gitignore.c \
+	src/git.c \
 	src/quote.c \
 	src/uniwidth.c \
 	src/layout.c \
