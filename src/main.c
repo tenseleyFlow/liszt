@@ -22,6 +22,8 @@
 #include "emit.h"
 #include "entry.h"
 #include "human.h"
+#include "git.h"
+#include "gitignore.h"
 #include "icons.h"
 #include "idcache.h"
 #include "layout.h"
@@ -229,6 +231,7 @@ struct litem {
     unsigned char padded;
     unsigned char linkok;
     unsigned char has_capability;
+    unsigned char git_status;   /* 0 none, ' ' blank, else letter */
 };
 
 static int
@@ -664,6 +667,34 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         prefix_len += (size_t)n;
     }
 
+    if (it->git_status) {
+        if (it->git_status == ' ') {
+            liszt_emit_str("   ");
+        } else {
+            static const struct liszt_binstr git_green =
+                { 2, "32" };
+            static const struct liszt_binstr git_blue = { 2, "34" };
+            static const struct liszt_binstr git_purple =
+                { 2, "35" };
+            static const struct liszt_binstr git_red = { 2, "31" };
+            char wc = (char)it->git_status;
+            const struct liszt_binstr *seq =
+                wc == 'N' ? &git_green
+                : wc == 'M' ? &git_blue
+                : wc == 'T' ? &git_purple
+                : wc == 'U' ? &git_red : NULL;
+            liszt_emit_byte('-');
+            if (o->print_with_color && seq != NULL) {
+                liszt_color_start(seq);
+                liszt_emit_byte(wc);
+                liszt_color_prep_non_filename();
+            } else {
+                liszt_emit_byte(wc);
+            }
+            liszt_emit_byte(' ');
+        }
+        prefix_len += 3;
+    }
     if (tree_prefix.len) {
         liszt_emit_bytes(tree_prefix.bytes, tree_prefix.len);
         prefix_len += tree_prefix.width;
@@ -756,6 +787,7 @@ struct operand {
     unsigned char padded;
     unsigned char linkok;
     unsigned char has_capability;
+    unsigned char git_status;
     bool is_dir;
 };
 
@@ -832,6 +864,7 @@ operand_to_litem(const struct operand *op, struct litem *it)
     it->acl = op->acl;
     it->linkok = op->linkok;
     it->has_capability = op->has_capability;
+    it->git_status = op->git_status;
 }
 
 static enum liszt_ftype
@@ -923,6 +956,280 @@ fetch_scontext(const char *dir, const char *name, bool follow)
    serial path by construction. Path joining is safe because xstat's
    join buffer is thread-local. */
 
+/* --- git status pipeline (v0.2 extension) -----------------------------
+
+   Serial per listed directory: resolve the repo context, build the
+   lookup window and the gitignore chain (deepest .gitignore first,
+   info/exclude last), precompute whether an ancestor directory is
+   itself ignored. The parallel phase then reads all of it immutably
+   and writes only its own meta slot. */
+
+struct gi_cache_node {
+    char *key;                  /* absolute .gitignore file path */
+    struct liszt_gi_file f;
+    bool present;
+    struct gi_cache_node *next;
+};
+static struct gi_cache_node *gi_cache;
+
+static struct {
+    bool active;                /* flags on and inside a repo */
+    bool column;                /* show_git: letters into meta */
+    bool blank;                 /* degraded repo: blank cells */
+    struct liszt_git_ctx *ctx;
+    const struct liszt_gi_file **chain;
+    size_t n_chain, chain_cap;
+    bool ancestor_ignored;
+    char rel[4096];             /* repo-relative listed dir, "" root */
+    size_t rel_len;
+} gd;
+
+/* Parse (or fetch cached) one ignore file; BASE is its repo-relative
+   directory. Returns NULL when the file does not exist. */
+static const struct liszt_gi_file *
+gi_load(const char *abspath, const char *base, size_t base_len)
+{
+    for (struct gi_cache_node *n = gi_cache; n != NULL; n = n->next)
+        if (strcmp(n->key, abspath) == 0)
+            return n->present ? &n->f : NULL;
+    struct gi_cache_node *n = liszt_xmalloc(sizeof *n);
+    n->key = liszt_xstrdup(abspath);
+    n->present = false;
+    memset(&n->f, 0, sizeof n->f);
+    FILE *fp = fopen(abspath, "r");
+    if (fp != NULL) {
+        char *buf = NULL;
+        size_t cap = 0, len = 0;
+        for (;;) {
+            if (len == cap) {
+                cap = cap ? cap * 2 : 4096;
+                buf = liszt_xrealloc(buf, cap);
+            }
+            size_t r = fread(buf + len, 1, cap - len, fp);
+            len += r;
+            if (r == 0)
+                break;
+        }
+        fclose(fp);
+        liszt_gi_file_parse(&n->f, buf ? buf : "", len, base, base_len);
+        free(buf);
+        n->present = true;
+    }
+    n->next = gi_cache;
+    gi_cache = n;
+    return n->present ? &n->f : NULL;
+}
+
+static void
+gd_chain_push(const struct liszt_gi_file *f)
+{
+    if (gd.n_chain == gd.chain_cap) {
+        gd.chain_cap = gd.chain_cap ? gd.chain_cap * 2 : 8;
+        gd.chain = liszt_xrealloc(gd.chain,
+                                  gd.chain_cap * sizeof *gd.chain);
+    }
+    gd.chain[gd.n_chain++] = f;
+}
+
+/* Is repo-relative PATH excluded by the current chain? Ancestors
+   already decided win ("cannot re-include inside an excluded dir"). */
+static bool
+gi_chain_excluded(const struct liszt_gi_file *const *chain, size_t n,
+                  const char *path, size_t len, size_t base_off,
+                  bool is_dir)
+{
+    for (size_t i = 0; i < n; i++) {
+        int r = liszt_gi_file_match(chain[i], path, len, base_off,
+                                    is_dir);
+        if (r >= 0)
+            return r == 1;
+    }
+    return false;
+}
+
+static void
+git_begin_dir(const char *dirname, const struct liszt_options *o)
+{
+    gd.active = false;
+    gd.column = false;
+    gd.blank = false;
+    gd.ctx = NULL;
+    gd.n_chain = 0;
+    gd.ancestor_ignored = false;
+    gd.rel_len = 0;
+    if (!o->show_git && !o->git_ignore)
+        return;
+    char *abs = liszt_canonicalize_missing(dirname);
+    if (abs == NULL)
+        return;
+    struct liszt_git_ctx *c = liszt_git_ctx_for(abs);
+    if (c == NULL) {
+        free(abs);
+        return;
+    }
+    gd.active = true;
+    gd.column = o->show_git;
+    gd.ctx = c;
+    if (c->degraded) {
+        gd.blank = true;
+        free(abs);
+        return;
+    }
+    liszt_git_window(c, abs);
+
+    size_t alen = strlen(abs);
+    while (alen > 1 && abs[alen - 1] == '/')
+        alen--;
+    if (alen > c->root_len && alen - c->root_len - 1 < sizeof gd.rel) {
+        gd.rel_len = alen - c->root_len - 1;
+        memcpy(gd.rel, abs + c->root_len + 1, gd.rel_len);
+    }
+    gd.rel[gd.rel_len] = '\0';
+
+    /* Root-to-dir ignore files; the entry chain wants deepest first,
+       the ancestor probe wants them in loading order. */
+    const struct liszt_gi_file *files[64];
+    size_t nf = 0;
+    char pathbuf[8192];
+    size_t comp = 0;    /* consumed bytes of rel */
+    for (;;) {
+        size_t dlen = comp == 0 ? 0 : comp;
+        int n = snprintf(pathbuf, sizeof pathbuf, "%s%s%.*s/.gitignore",
+                         c->root, dlen ? "/" : "", (int)dlen, gd.rel);
+        const struct liszt_gi_file *f = NULL;
+        if (n > 0 && (size_t)n < sizeof pathbuf && nf < 64)
+            f = gi_load(pathbuf, gd.rel, dlen);
+        if (f != NULL)
+            files[nf++] = f;
+        if (comp >= gd.rel_len)
+            break;
+        /* Next component: is the child directory itself ignored? */
+        size_t next = comp;
+        if (next > 0)
+            next++;             /* skip '/' */
+        while (next < gd.rel_len && gd.rel[next] != '/')
+            next++;
+        if (!gd.ancestor_ignored) {
+            /* Deepest-loaded first, then info/exclude below - the
+               exclude file is weaker than every .gitignore, probe it
+               after. */
+            bool exc = false;
+            for (size_t i = nf; i > 0 && !exc; i--) {
+                int r = liszt_gi_file_match(files[i - 1], gd.rel, next,
+                                            comp ? comp + 1 : 0, true);
+                if (r >= 0) {
+                    exc = r == 1;
+                    break;
+                }
+            }
+            if (!exc) {
+                int en = snprintf(pathbuf, sizeof pathbuf,
+                                  "%s/info/exclude", c->common);
+                const struct liszt_gi_file *ef = NULL;
+                if (en > 0 && (size_t)en < sizeof pathbuf)
+                    ef = gi_load(pathbuf, "", 0);
+                if (ef != NULL) {
+                    int r = liszt_gi_file_match(ef, gd.rel, next,
+                                                comp ? comp + 1 : 0,
+                                                true);
+                    exc = r == 1;
+                }
+            }
+            if (exc)
+                gd.ancestor_ignored = true;
+        }
+        comp = next;
+    }
+    for (size_t i = nf; i > 0; i--)
+        gd_chain_push(files[i - 1]);
+    int en = snprintf(pathbuf, sizeof pathbuf, "%s/info/exclude",
+                      c->common);
+    if (en > 0 && (size_t)en < sizeof pathbuf) {
+        const struct liszt_gi_file *ef = gi_load(pathbuf, "", 0);
+        if (ef != NULL)
+            gd_chain_push(ef);
+    }
+    free(abs);
+}
+
+/* Repo-relative exclusion probe for one entry NAME in the listed dir.
+   Thread-safe: stack buffer, immutable chain. */
+static bool
+git_name_ignored(const char *name, size_t len, bool is_dir)
+{
+    if (gd.ancestor_ignored)
+        return true;
+    char buf[4096];
+    size_t plen = gd.rel_len ? gd.rel_len + 1 : 0;
+    if (plen + len + 1 > sizeof buf)
+        return false;
+    if (plen) {
+        memcpy(buf, gd.rel, gd.rel_len);
+        buf[gd.rel_len] = '/';
+    }
+    memcpy(buf + plen, name, len);
+    buf[plen + len] = '\0';
+    return gi_chain_excluded(gd.chain, gd.n_chain, buf, plen + len,
+                             plen, is_dir);
+}
+
+/* The status letter for one entry (assumes gd.active). */
+static char
+git_entry_letter(const char *name, size_t len, bool is_dir,
+                 const struct liszt_statinfo *st, bool stat_ok)
+{
+    if (gd.blank)
+        return ' ';
+    if ((len == 4 && memcmp(name, ".git", 4) == 0)
+        || (name[0] == '.'
+            && (len == 1 || (len == 2 && name[1] == '.'))))
+        return '-';
+    struct liszt_git_wtstat ws;
+    const struct liszt_git_wtstat *wsp = NULL;
+    if (stat_ok) {
+        ws.mtime_sec = (int64_t)st->mtime.tv_sec;
+        ws.mtime_nsec = (int32_t)st->mtime.tv_nsec;
+        ws.size = (uint64_t)st->size;
+        ws.mode = (uint32_t)st->mode;
+        wsp = &ws;
+    }
+    char cst = liszt_git_status(gd.ctx, name, len, is_dir, wsp);
+    if (cst != 0)
+        return cst;
+    return git_name_ignored(name, len, is_dir) ? 'I' : 'N';
+}
+
+/* --git-ignore: compact the entry list in place before meta, widths,
+   and sort ever see it. Tracked names never drop (git's order). */
+static void
+git_filter_entries(struct liszt_entries *es)
+{
+    if (!gd.active || !cur_opts->git_ignore || gd.blank)
+        return;
+    size_t w = 0;
+    for (size_t i = 0; i < es->len; i++) {
+        struct liszt_entry *e = &es->v[i];
+        const char *nm = liszt_entry_name(es, e);
+        size_t len = e->name_len;
+        bool drop = false;
+        bool special = (len == 4 && memcmp(nm, ".git", 4) == 0)
+            || (nm[0] == '.'
+                && (len == 1 || (len == 2 && nm[1] == '.')));
+        if (!special
+            && liszt_git_status(gd.ctx, nm, len,
+                                e->ftype == LISZT_T_DIR, NULL) == 0)
+            drop = git_name_ignored(nm, len, e->ftype == LISZT_T_DIR);
+        if (!drop) {
+            es->v[w] = *e;
+            /* Meta slots are assigned per surviving entry: ensure_meta
+               sizes its array to the compacted length. */
+            es->v[w].meta_idx = (uint32_t)w;
+            w++;
+        }
+    }
+    es->len = w;
+}
+
 struct meta_par_ctx {
     const char *dirname;
     const struct liszt_options *o;
@@ -960,9 +1267,18 @@ meta_par_task(void *vctx, size_t i)
             e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
         } else {
             m->stat_errno = errno;
+            if (gd.column)
+                m->git_status = (unsigned char)
+                    git_entry_letter(nm, e->name_len,
+                                     e->ftype == LISZT_T_DIR, &m->st,
+                                     false);
             return;     /* serial pass diagnoses and skips, in order */
         }
     }
+    if (gd.column)
+        m->git_status = (unsigned char)
+            git_entry_letter(nm, e->name_len, e->ftype == LISZT_T_DIR,
+                             &m->st, m->stat_ok);
     if (plan.cap_probe
         && (e->ftype == LISZT_T_REG || e->ftype == LISZT_T_UNKNOWN))
         m->has_capability =
@@ -1284,6 +1600,19 @@ fill_meta(const char *dirname, const struct liszt_options *o,
             }
         }
     }
+    /* Serial mode: the parallel phase filled letters; sweep the rest
+       (0 marks unset - active letters are never 0). */
+    if (gd.column)
+        for (size_t i = 0; i < es->len; i++) {
+            struct liszt_entry *e = &es->v[i];
+            struct liszt_entrymeta *m = &es->meta[e->meta_idx];
+            if (m->git_status == 0)
+                m->git_status = (unsigned char)
+                    git_entry_letter(liszt_entry_name(es, e),
+                                     e->name_len,
+                                     e->ftype == LISZT_T_DIR, &m->st,
+                                     m->stat_ok);
+        }
 }
 
 static void
@@ -1322,6 +1651,7 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
     it->acl = m ? m->acl : 0;
     it->linkok = m ? m->linkok : 0;
     it->has_capability = m ? m->has_capability : 0;
+    it->git_status = m ? m->git_status : 0;
 }
 
 /* The decoration pass: quoted display form, width, quoted flag - once
@@ -1553,6 +1883,8 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
     };
     liszt_dirread_collect_from(dh, &ig, es, on_dirread_fail, &dc);
 
+    git_begin_dir(name, o);
+    git_filter_entries(es);
     fill_meta(name, o, es);
     decorate_entries(o, es);
     liszt_sort_entries(es);
@@ -1741,6 +2073,8 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
     struct liszt_entries *es = tree_level_pool(tc, depth);
     liszt_dirread_collect_from(dh, &ig, es, on_dirread_fail, &dc);
 
+    git_begin_dir(tc->path, o);
+    git_filter_entries(es);
     fill_meta(tc->path, o, es);
     decorate_entries(o, es);
     /* HAZARD (locked): cur_some_quoted is written at decorate and read
@@ -1904,6 +2238,40 @@ main(int argc, char **argv)
     if (o.sort != LISZT_SORT_NONE && n_ops > 1)
         liszt_sort_operands(ops, (size_t)n_ops, sizeof *ops, operand_item);
 
+    /* --git for command-line operands: resolve serially via each
+       operand's dirname context; non-repo files pad blank in a mixed
+       batch, a repo-free batch omits the column entirely. */
+    if (o.show_git) {
+        bool any = false;
+        for (int i = 0; i < n_ops; i++) {
+            const char *nm = ops[i].name;
+            const char *sl = strrchr(nm, '/');
+            char dbuf[4096];
+            const char *dnm = ".";
+            if (sl != NULL) {
+                size_t dl = sl == nm ? 1 : (size_t)(sl - nm);
+                if (dl >= sizeof dbuf)
+                    continue;
+                memcpy(dbuf, nm, dl);
+                dbuf[dl] = '\0';
+                dnm = dbuf;
+            }
+            git_begin_dir(dnm, &o);
+            if (gd.active) {
+                const char *base = sl ? sl + 1 : nm;
+                ops[i].git_status = (unsigned char)
+                    git_entry_letter(base, strlen(base),
+                                     ops[i].ftype == LISZT_T_DIR,
+                                     &ops[i].st, ops[i].stat_ok);
+                any = true;
+            }
+        }
+        if (any)
+            for (int i = 0; i < n_ops; i++)
+                if (ops[i].git_status == 0)
+                    ops[i].git_status = ' ';
+    }
+
     int n_files = 0;
     int n_dirs = implicit_dot ? 1 : 0;
     for (int i = 0; i < n_ops; i++)
@@ -2040,6 +2408,16 @@ main(int argc, char **argv)
         free(ops[i].scontext);
     }
     free(ops);
+    for (struct gi_cache_node *n = gi_cache; n != NULL;) {
+        struct gi_cache_node *nx = n->next;
+        free(n->key);
+        if (n->present)
+            liszt_gi_file_free(&n->f);
+        free(n);
+        n = nx;
+    }
+    free(gd.chain);
+    liszt_git_shutdown();
     free(o.operands);
     free(o.hide_patterns);
     free(o.ignore_patterns);

@@ -46,6 +46,8 @@ struct liszt_entrymeta {
     unsigned char acl;      /* 0 none, 1 context-only '.', 2 acl '+' */
     unsigned char linkok;   /* symlink target exists */
     unsigned char has_capability;
+    unsigned char git_status;   /* 0 none, ' ' blank cell, else the
+                                   worktree letter (--git, v0.2) */
 };
 
 /* Per-directory entry list: one byte arena plus a record array, both

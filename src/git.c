@@ -1,6 +1,7 @@
 #include "git.h"
 
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +23,7 @@
 
 static bool debug_git;
 static bool debug_git_init;
-static unsigned long racy_seen;
+static _Atomic unsigned long racy_seen;
 
 static bool
 dbg(void)
@@ -723,6 +724,15 @@ probe_dotgit(const char *dir, size_t len, char **gitdir_out)
         return false;
     }
     if (S_ISDIR(st.st_mode)) {
+        /* Git validates the gitdir; a bare ".git" directory dropped
+           by some tool is not a repo. HEAD is the cheap tell. */
+        char *head = join2(dg, "HEAD");
+        bool ok = lstat(head, &st) == 0;
+        free(head);
+        if (!ok) {
+            free(dg);
+            return false;
+        }
         *gitdir_out = dg;
         return true;
     }
@@ -739,9 +749,17 @@ probe_dotgit(const char *dir, size_t len, char **gitdir_out)
         char *dirbuf = liszt_xmalloc(len + 1);
         memcpy(dirbuf, dir, len);
         dirbuf[len] = '\0';
-        *gitdir_out = resolve_rel(dirbuf, v);
+        char *gedir = resolve_rel(dirbuf, v);
         free(dirbuf);
         free(buf);
+        char *head = join2(gedir, "HEAD");
+        bool ok = lstat(head, &st) == 0;
+        free(head);
+        if (!ok) {
+            free(gedir);
+            return false;
+        }
+        *gitdir_out = gedir;
         return true;
     }
     free(dg);
