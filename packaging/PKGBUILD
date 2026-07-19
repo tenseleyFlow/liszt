@@ -13,7 +13,7 @@ url="https://github.com/tenseleyFlow/liszt"
 license=('GPL-3.0-or-later')
 makedepends=('gcc')
 source=("$url/releases/download/v$pkgver/liszt-$pkgver.tar.gz")
-sha256sums=('FILLED_FROM_PUBLISHED_TARBALL')
+sha256sums=('62be1698a0a8c767056be3e4fbc03812d97adc152643f2a559cad241ef825eb8')
 
 build() {
 	cd "$pkgname-$pkgver"
