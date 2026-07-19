@@ -135,7 +135,9 @@ known_term_type(void)
 }
 
 /* get_funky_string port (ls.c 2470): decode one LS_COLORS value into
-   *DEST, stopping at ':' or NUL (or '=' when EQUALS_END). */
+   *DEST, stopping at ':' or NUL (or '=' when EQUALS_END). Exported as
+   liszt_funky_decode for LS_ICONS (sprint 12); the wrapper keeps this
+   internal name for the parser below. */
 static bool
 get_funky_string(char **dest, const char **src, bool equals_end,
                  size_t *output_count)
@@ -415,11 +417,10 @@ done:
     ext_table_build();
 }
 
-const struct liszt_binstr *
-liszt_color_for(const struct liszt_colorable *c)
+enum liszt_cind
+liszt_file_class(const struct liszt_colorable *c)
 {
     enum liszt_cind type;
-    struct color_ext_type *ext = NULL;
 
     if (c->linkok == -1 && liszt_color_is_colored(LISZT_C_MISSING)) {
         type = LISZT_C_MISSING;
@@ -475,6 +476,14 @@ liszt_color_for(const struct liszt_colorable *c)
             type = LISZT_C_ORPHAN;
         }
     }
+    return type;
+}
+
+const struct liszt_binstr *
+liszt_color_for(const struct liszt_colorable *c)
+{
+    enum liszt_cind type = liszt_file_class(c);
+    struct color_ext_type *ext = NULL;
 
     if (type == LISZT_C_FILE) {
         size_t len = strlen(c->name);
@@ -608,4 +617,11 @@ liszt_color_restore_is_noop(void)
         && memcmp(color_indicator[LISZT_C_LEFT].string, "\033[", 2) == 0
         && color_indicator[LISZT_C_RIGHT].len == 1
         && color_indicator[LISZT_C_RIGHT].string[0] == 'm';
+}
+
+bool
+liszt_funky_decode(char **dest, const char **src, bool equals_end,
+                   size_t *output_count)
+{
+    return get_funky_string(dest, src, equals_end, output_count);
 }

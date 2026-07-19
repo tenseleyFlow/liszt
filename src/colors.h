@@ -49,6 +49,18 @@ struct liszt_colorable {
     bool multi_hardlink;
 };
 
+/* LS_COLORS-style value decoder (get_funky_string port): decodes one
+   \-escaped value from *SRC into *DEST, advancing both; stops at ':'
+   or NUL (or '=' when EQUALS_END). For extension env parsers
+   (LS_ICONS). */
+bool liszt_funky_decode(char **dest, const char **src, bool equals_end,
+                        size_t *output_count);
+
+/* The classification half of get_color_indicator: which indicator
+   class this file belongs to. Shared vocabulary for color and icon
+   resolution (sprint 11 extraction; byte-identical behavior). */
+enum liszt_cind liszt_file_class(const struct liszt_colorable *c);
+
 /* get_color_indicator: the escape to paint with, or NULL. */
 const struct liszt_binstr *liszt_color_for(const struct liszt_colorable *c);
 
