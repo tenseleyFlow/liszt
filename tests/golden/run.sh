@@ -65,7 +65,8 @@ cases=0
 # sanctioned normalizations are named oracle-vintage substitutions, added
 # case by case as they are discovered - never broad sed.
 normprog() {
-    sed -e 's/^[^:][^:]*:/PROG:/'
+    sed -e 's/^[^:][^:]*:/PROG:/' \
+        -e "s|Try '[^']* --help'|Try 'PROG --help'|"
 }
 
 run_pinned() {
@@ -118,6 +119,13 @@ if [ -n "$utf8_locale" ]; then
     selftest "core fixture -1aR (utf8)" "$utf8_locale" 1 "$oracle" -1aR "$work/fix/core"
 fi
 
+cases=$((cases + 1))
+if [ "$(printf "Try '/usr/sbin/ls --help' for more information.\n" | normprog)" \
+    != "Try 'PROG --help' for more information." ]; then
+    echo "SELFTEST FAIL: normprog Try line" >&2
+    fails=$((fails + 1))
+fi
+
 # Normalization self-test: any program token collapses to PROG:.
 for tok in ls gls liszt lz; do
     got=$(printf '%s: cannot access\n' "$tok" | normprog)
@@ -166,8 +174,89 @@ run_case() {
     fi
 }
 
-# Case matrix: populated from sprint 01 on. Tags are owning sprints.
-# (No liszt-vs-oracle cases exist at sprint 00; the stubs list nothing.)
+# Phase-2 fixtures beyond the generated core tree.
+fix="$work/fix/core"
+mkdir -p "$work/empty" "$work/dotonly"
+printf 'x\n' > "$work/dotonly/.a"
+printf 'x\n' > "$work/dotonly/.b"
+
+# Case matrix. Tags are owning sprints. All cases pipe stdout and pin env
+# via run_pinned; -U throughout until sprint 02 lands sorting.
+U8="${utf8_locale:-C}"
+
+# 01: single-directory enumeration and ignore modes.
+run_case 1 "empty dir" C 0 -- -U1 "$work/empty"
+run_case 1 "empty dir -a" C 0 -- -Ua1 "$work/empty"
+run_case 1 "dotonly default" C 0 -- -U1 "$work/dotonly"
+run_case 1 "dotonly -a" C 0 -- -Ua1 "$work/dotonly"
+run_case 1 "dotonly -A" C 0 -- -UA1 "$work/dotonly"
+run_case 1 "plain" C 0 -- -U1 "$fix/plain"
+run_case 1 "plain -a" C 0 -- -Ua1 "$fix/plain"
+run_case 1 "plain -A" C 0 -- -UA1 "$fix/plain"
+run_case 1 "shapes -a" C 0 -- -Ua1 "$fix/shapes"
+run_case 1 "shapes -a utf8" "$U8" 0 -- -Ua1 "$fix/shapes"
+run_case 1 "links -a" C 0 -- -Ua1 "$fix/links"
+run_case 1 "meta -a" C 0 -- -Ua1 "$fix/meta"
+run_case 1 "sizes" C 0 -- -U1 "$fix/sizes"
+run_case 1 "times" C 0 -- -U1 "$fix/times"
+run_case 1 "perm -a" C 0 -- -Ua1 "$fix/perm"
+
+# 01: operands, headers, ordering, diagnostics.
+run_case 1 "two dirs" C 0 -- -U1 "$fix/links" "$fix/plain"
+run_case 1 "file then dir" C 0 -- -U1 "$fix/times/old-a" "$fix/plain"
+run_case 1 "dir then file" C 0 -- -U1 "$fix/plain" "$fix/times/old-a"
+run_case 1 "two files" C 0 -- -U1 "$fix/times/old-a" "$fix/times/recent-a"
+run_case 1 "missing operand" C 2 -- -U1 "$work/nope"
+run_case 1 "missing plus dir" C 2 -- -U1 "$work/nope" "$fix/plain"
+run_case 1 "empty operand" C 2 -- -U1 ""
+run_case 1 "unreadable dir operand" C 2 -- -U1 "$fix/perm/no-access"
+run_case 1 "unreadable among dirs" C 2 -- -U1 "$fix/perm/no-access" "$fix/plain"
+run_case 1 "symlink-to-dir operand" C 0 -- -U1 "$fix/links/gooddir"
+run_case 1 "symlink-to-file operand" C 0 -- -U1 "$fix/links/good"
+run_case 1 "dangling symlink operand" C 0 -- -U1 "$fix/links/dangling"
+run_case 1 "dashdash" C 0 -- -U1 -- "$fix/plain"
+run_case 1 "permuted options" C 0 -- "$fix/plain" -U1
+run_case 1 "format word equals -1" C 0 -- -U --format=single-column "$fix/plain"
+
+# 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
+run_case 1 "unrecognized long" C 2 -- --bogus
+run_case 1 "invalid short" C 2 -- -Y
+run_case 1 "format missing arg" C 2 -- --format
+run_case 1 "long noarg with value" C 2 -- --all=x
+run_case 1 "ambiguous long" C 2 -- --f
+run_case 1 "format invalid word" C 1 -- -U --format=bogus "$fix/plain"
+run_case 1 "format ambiguous word" C 1 -- -U --format=v "$fix/plain"
+run_case 1 "format invalid word utf8" "$U8" 1 -- -U --format=bogus "$fix/plain"
+
+# 01: bespoke shapes run_case cannot express.
+if [ 1 -le "$active" ]; then
+    # Implicit "." (operandless), from inside a fixture dir.
+    cases=$((cases + 1))
+    (cd "$fix/plain" && run_pinned C "$work/liszt.uut" -U1) \
+        > "$work/u.out" 2> "$work/u.raw"
+    urc=$?
+    (cd "$fix/plain" && run_pinned C "$oracle" -U1) \
+        > "$work/o.out" 2> "$work/o.raw"
+    orc=$?
+    if [ "$urc" -ne "$orc" ] || ! cmp -s "$work/u.out" "$work/o.out"; then
+        echo "CASE FAIL [implicit dot]" >&2
+        fails=$((fails + 1))
+    fi
+    # POSIXLY_CORRECT stops option parsing at the first operand.
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 LS_COLORS= \
+        POSIXLY_CORRECT=1 "$work/liszt.uut" -U1 "$fix/plain" -a \
+        > "$work/u.out" 2>/dev/null
+    urc=$?
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 LS_COLORS= \
+        POSIXLY_CORRECT=1 "$oracle" -U1 "$fix/plain" -a \
+        > "$work/o.out" 2>/dev/null
+    orc=$?
+    if [ "$urc" -ne "$orc" ] || ! cmp -s "$work/u.out" "$work/o.out"; then
+        echo "CASE FAIL [posixly-correct stop]" >&2
+        fails=$((fails + 1))
+    fi
+fi
 
 if [ "$fails" -gt 0 ]; then
     echo "tests/golden: $fails/$cases failed (oracle: $oracle, coreutils $oracle_version)" >&2

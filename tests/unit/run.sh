@@ -43,10 +43,29 @@ checks=$((checks + 1))
 conf_ver=$(sed -n 's/^LISZT_VERSION="\(.*\)"/\1/p' configure)
 check_eq "configure/binary version agree" "liszt $conf_ver" "$(./liszt --version)"
 
-# Skeleton: anything else is a serious error (exit 2) with a diagnostic.
+# Unimplemented surface exits 2 with a diagnostic; sorted listings are
+# sprint 02, so a bare invocation (default sort=name) still exits 2.
 check_status "bare invocation exits 2" 2 ./liszt
 check_status "unknown option exits 2" 2 ./liszt --bogus
-check_status "operand exits 2" 2 ./liszt /tmp
+check_status "default-sort operand exits 2" 2 ./liszt /tmp
+check_status "argmatch error exits 1 (GNU quirk)" 1 ./liszt --format=bogus
+
+# Functional sprint-01 surface.
+udir=$(mktemp -d "${TMPDIR:-/tmp}/liszt-unit.XXXXXX")
+trap 'rm -rf "$udir"' EXIT INT TERM
+printf 'x\n' > "$udir/bb"
+printf 'x\n' > "$udir/aa"
+printf 'x\n' > "$udir/.dot"
+check_status "-U1 lists a directory" 0 ./liszt -U1 "$udir"
+check_status "permuted options accepted" 0 ./liszt "$udir" -U1
+n_default=$(./liszt -U1 "$udir" | wc -l)
+n_all=$(./liszt -Ua1 "$udir" | wc -l)
+n_almost=$(./liszt -UA1 "$udir" | wc -l)
+check_eq "-a adds . .. and dotfiles" "$((n_default + 3))" "$n_all"
+check_eq "-A adds dotfiles only" "$((n_default + 1))" "$n_almost"
+fmt_out=$(./liszt -U --format=single-column "$udir")
+one_out=$(./liszt -U1 "$udir")
+check_eq "--format=single-column equals -1" "$one_out" "$fmt_out"
 err=$(./liszt 2>&1 >/dev/null)
 case "$err" in
 liszt:*) : ;;
