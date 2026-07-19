@@ -9,6 +9,7 @@
 #include <wctype.h>
 
 #include "config.h"
+#include "sys/scan.h"
 #include "uniwidth.h"
 #include "util.h"
 
@@ -486,10 +487,15 @@ liszt_mbsnwidth(const char *s, size_t n)
 
     if (MB_CUR_MAX > 1) {
         while (p < plimit) {
-            unsigned char c = (unsigned char)*p;
-            if (c >= 0x20 && c < 0x7f) {
-                p++;
-                width++;
+            /* Printable-ASCII spans contribute width == bytes; leap
+               them with the scan kernel before touching mbrtowc. */
+            size_t span = liszt_scan_ascii_graph(
+                (const unsigned char *)p, (size_t)(plimit - p));
+            if (span > 0) {
+                if (span > (size_t)(INT_MAX - width))
+                    return -1;
+                width += (int)span;
+                p += span;
                 continue;
             }
             {

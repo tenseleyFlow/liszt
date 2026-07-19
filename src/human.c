@@ -69,20 +69,28 @@ liszt_human_readable(uintmax_t n, char *buf, int opts,
         & (LISZT_HUMAN_ROUND_TO_NEAREST | LISZT_HUMAN_FLOOR
            | LISZT_HUMAN_CEILING);
     unsigned int base = (opts & LISZT_HUMAN_BASE_1024) ? 1024 : 1000;
-    const char *decimal_point = ".";
-    size_t decimal_pointlen = 1;
-    const char *grouping = "";
-    const char *thousands_sep = "";
-    struct lconv *l = localeconv();
-    size_t pointlen = strlen(l->decimal_point);
+    /* localeconv() was 5% of the -l lane when consulted per call; the
+       locale cannot change mid-run, so resolve the pieces once. */
+    static const char *decimal_point;
+    static size_t decimal_pointlen;
+    static const char *grouping;
+    static const char *thousands_sep;
 
-    if (0 < pointlen && pointlen <= MB_LEN_MAX) {
-        decimal_point = l->decimal_point;
-        decimal_pointlen = pointlen;
+    if (decimal_point == NULL) {
+        struct lconv *l = localeconv();
+        size_t pointlen = strlen(l->decimal_point);
+
+        decimal_point = ".";
+        decimal_pointlen = 1;
+        grouping = l->grouping;
+        thousands_sep = "";
+        if (0 < pointlen && pointlen <= MB_LEN_MAX) {
+            decimal_point = l->decimal_point;
+            decimal_pointlen = pointlen;
+        }
+        if (strlen(l->thousands_sep) <= MB_LEN_MAX)
+            thousands_sep = l->thousands_sep;
     }
-    grouping = l->grouping;
-    if (strlen(l->thousands_sep) <= MB_LEN_MAX)
-        thousands_sep = l->thousands_sep;
 
     char *psuffix = buf + LISZT_LONGEST_HUMAN_READABLE - 1 - SUFFIX_MAX;
     char *p = psuffix;

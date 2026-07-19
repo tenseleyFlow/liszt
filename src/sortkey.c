@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sys/scan.h"
 #include "util.h"
 
 /* Ports from rank (adapted, not linked): the collation identity probe
@@ -488,6 +489,14 @@ any_invalid_multibyte(const struct liszt_entries *es)
         mbstate_t st;
         memset(&st, 0, sizeof st);
         while (left > 0) {
+            /* ASCII spans are valid in any locale and keep the initial
+               shift state; leap them (scan kernel). */
+            size_t a = liszt_scan_nonascii((const unsigned char *)p,
+                                           left);
+            p += a;
+            left -= a;
+            if (left == 0)
+                break;
             size_t r = mbrtowc(NULL, p, left, &st);
             if (r == (size_t)-1 || r == (size_t)-2)
                 return true;

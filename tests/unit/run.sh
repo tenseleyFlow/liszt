@@ -120,6 +120,70 @@ if [ -z "$h1" ] || [ "$h1" = "$h3" ]; then
     note_fail "fixture generator seed variation (seed42=$h1 seed7=$h3)"
 fi
 
+# Scan kernels: fuzz the inline SIMD paths against the scalar oracles
+# (rank's scan-fuzz shape), and fail if a SIMD-capable build silently
+# runs scalar (tally's engagement lesson).
+scanwork=$(mktemp -d "${TMPDIR:-/tmp}/liszt-scan.XXXXXX")
+trap 'chmod -R u+rwx "$fixwork" 2>/dev/null; rm -rf "$fixwork" "$scanwork"' EXIT INT TERM
+cat > "$scanwork/scanfuzz.c" <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include "sys/scan.h"
+int main(void)
+{
+    unsigned s = 42;
+    unsigned char buf[4096];
+    for (int trial = 0; trial < 4000; trial++) {
+        s = s * 1103515245u + 12345u;
+        size_t len = s % sizeof buf;
+        int mode = (s >> 8) % 4;
+        for (size_t i = 0; i < len; i++) {
+            s = s * 1103515245u + 12345u;
+            unsigned char b;
+            switch (mode) {
+            case 0: b = (unsigned char)s; break;                 /* wild */
+            case 1: b = (unsigned char)(0x20 + s % 0x5F); break; /* graph */
+            case 2: b = (unsigned char)(s % 0x80); break;        /* ascii */
+            default: b = (unsigned char)(0x60 + s % 0x40); break;/* edge */
+            }
+            buf[i] = b;
+        }
+        /* Every offset: kernels must agree with oracles including on
+           unaligned starts and short tails. */
+        for (size_t off = 0; off < 24 && off < len; off += 7) {
+            const unsigned char *p = buf + off;
+            size_t n = len - off;
+            if (liszt_scan_nonascii(p, n)
+                != liszt_scan_nonascii_scalar(p, n)) {
+                printf("nonascii mismatch %d/%zu\n", trial, off);
+                return 1;
+            }
+            if (liszt_scan_ascii_graph(p, n)
+                != liszt_scan_ascii_graph_scalar(p, n)) {
+                printf("graph mismatch %d/%zu\n", trial, off);
+                return 1;
+            }
+        }
+    }
+    puts(liszt_scan_backend());
+    return 0;
+}
+EOF
+checks=$((checks + 1))
+if cc -O2 -std=c11 -I src -o "$scanwork/scanfuzz" "$scanwork/scanfuzz.c"     src/sys/scan.c 2>"$scanwork/cc.err"; then
+    backend=$("$scanwork/scanfuzz") || note_fail "scan kernel fuzz mismatch"
+    case "$(uname -m)" in
+    x86_64|amd64|aarch64|arm64)
+        checks=$((checks + 1))
+        if [ "$backend" = "scalar" ]; then
+            note_fail "SIMD-capable build runs scalar scan kernels"
+        fi
+        ;;
+    esac
+else
+    note_fail "scan fuzz harness failed to compile"
+fi
+
 # Makefile SRC list matches the files on disk (unwired sources fail loudly).
 listed=$(sed -n '/^SRC =/,/^$/p' Makefile | grep -o 'src/[a-z_/]*\.c' | sort)
 ondisk=$(ls src/*.c src/sys/*.c | sort)
