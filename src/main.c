@@ -829,7 +829,11 @@ fetch_scontext(const char *dir, const char *name, bool follow)
         return NULL;
     }
     if (cn < 0 && errno != ENOTSUP && errno != ENODATA
-        && errno != EOPNOTSUPP)
+        && errno != EOPNOTSUPP
+#ifdef ENOATTR
+        && errno != ENOATTR     /* Darwin's missing-attribute errno */
+#endif
+        )
         fprintf(stderr, "%s: %s: %s\n", liszt_prog,
                 quote_f(*dir ? liszt_join_path(dir, name) : name),
                 strerror(errno));
