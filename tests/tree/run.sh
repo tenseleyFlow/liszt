@@ -231,6 +231,23 @@ run_tree mix "files before trees" C 0 -- --tree top/zz.txt top/a2
 run_tree dwins "-d wins, tree inert" C 0 -- --tree -d top
 run_tree zero "--zero smoke" C 0 -- --tree --zero top/a2
 
+# --tree-limit (13C): cap after sort, summary as final sibling, capped
+# subdirs never walked.
+run_tree_u8 limit-basic "limit 2 with summary" 0 \
+    -- --tree --tree-limit=2 top
+run_tree limit-nested "limit 1 caps every level" C 0 \
+    -- --tree --tree-limit=1 top
+run_tree limit-exact "limit equal to count, no summary" C 0 \
+    -- --tree --tree-limit=4 top
+run_tree limit-onemore "singular summary" C 0 \
+    -- --tree --tree-limit=3 top
+run_tree limit-zero-eol "summary honors --zero eol" C 0 \
+    -- --tree --zero --tree-limit=1 top/a1
+# Proof capped subdirs are not walked: reversed order caps away the
+# permission trap - any walk would diagnose on stderr.
+run_tree limit-notwalked "capped trap not walked" C 0 \
+    -- --tree -r --tree-limit=1 guard
+
 # Unreadable subdir: entry line prints, descent diagnoses, exit 1.
 run_tree denied "permission-denied subdir" C 1 -- --tree guard
 

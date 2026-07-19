@@ -1750,10 +1750,20 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
     bool some_quoted = cur_some_quoted;
     liszt_sort_entries(es);
 
+    /* --tree-limit caps AFTER sorting; hidden entries neither widen
+       columns nor get walked. The summary is the final sibling for
+       glyph purposes. */
+    size_t n_show = es->len;
+    bool capped = false;
+    if (o->tree_limit && es->len > o->tree_limit) {
+        n_show = o->tree_limit;
+        capped = true;
+    }
+
     struct lwidths w = { 0 };
     if (needs_columns(o)) {
         struct litem wit;
-        for (size_t i = 0; i < es->len; i++) {
+        for (size_t i = 0; i < n_show; i++) {
             entry_to_item(es, &es->v[i], &wit);
             widths_add(&w, o, &wit);
         }
@@ -1761,10 +1771,10 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
 
     size_t psave = tc->prefix_len;
     size_t pwsave = tc->prefix_width;
-    for (size_t i = 0; i < es->len; i++) {
+    for (size_t i = 0; i < n_show; i++) {
         struct litem it;
         entry_to_item(es, &es->v[i], &it);
-        bool last_sib = i == es->len - 1;
+        bool last_sib = !capped && i == n_show - 1;
 
         tree_prefix_append(tc, last_sib ? tc->g->last : tc->g->branch,
                            last_sib ? tc->g->last_len
@@ -1795,6 +1805,18 @@ tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
             tc->prefix_width = pwsave;
             cur_some_quoted = some_quoted;
         }
+    }
+    if (capped) {
+        /* Plain bytes: no color, no indicator, no icon. */
+        tree_prefix_append(tc, tc->g->last, tc->g->last_len);
+        char sbuf[32];
+        int sn = snprintf(sbuf, sizeof sbuf, "... %zu more",
+                          es->len - n_show);
+        liszt_emit_bytes(tc->prefix, tc->prefix_len);
+        liszt_emit_bytes(sbuf, (size_t)sn);
+        liszt_emit_byte(o->eolbyte);
+        tc->prefix_len = psave;
+        tc->prefix_width = pwsave;
     }
     pop_active_dir();
 }
