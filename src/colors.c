@@ -59,6 +59,51 @@ static char *color_buf;
 static bool color_symlink_referent;
 static bool used_color;
 
+/* Suffix table (09C): candidates bucketed by case-folded final byte,
+   in list order. Sound because any match - exact or case-insensitive -
+   requires the suffix's folded last byte to equal the name's; entries
+   in other buckets can never match, so first-hit-in-bucket equals
+   first-hit-in-list. Shadowed entries (len SIZE_MAX) are dropped at
+   build. A zero-length suffix has no final byte; such degenerate
+   schemes fall back to the linear walk. */
+struct ext_bucket {
+    struct color_ext_type **v;
+    size_t n, cap;
+};
+static struct ext_bucket ext_buckets[256];
+static bool ext_table_ok;
+
+static unsigned char
+fold_byte(unsigned char b)
+{
+    return (unsigned char)(b >= 'A' && b <= 'Z' ? b + 32 : b);
+}
+
+static void
+ext_table_build(void)
+{
+    for (int i = 0; i < 256; i++)
+        ext_buckets[i].n = 0;
+    ext_table_ok = true;
+    for (struct color_ext_type *e = color_ext_list; e != NULL;
+         e = e->next) {
+        if (e->ext.len == (size_t)-1)
+            continue;
+        if (e->ext.len == 0) {
+            ext_table_ok = false;
+            return;
+        }
+        unsigned char last =
+            fold_byte((unsigned char)e->ext.string[e->ext.len - 1]);
+        struct ext_bucket *b = &ext_buckets[last];
+        if (b->n == b->cap) {
+            b->cap = b->cap ? b->cap * 2 : 4;
+            b->v = liszt_xrealloc(b->v, b->cap * sizeof *b->v);
+        }
+        b->v[b->n++] = e;
+    }
+}
+
 bool
 liszt_color_is_colored(enum liszt_cind ind)
 {
@@ -366,6 +411,8 @@ done:
     if (color_indicator[LISZT_C_LINK].len == 6
         && strncmp(color_indicator[LISZT_C_LINK].string, "target", 6) == 0)
         color_symlink_referent = true;
+
+    ext_table_build();
 }
 
 const struct liszt_binstr *
@@ -432,17 +479,36 @@ liszt_color_for(const struct liszt_colorable *c)
     if (type == LISZT_C_FILE) {
         size_t len = strlen(c->name);
         const char *name = c->name + len;
-        for (ext = color_ext_list; ext != NULL; ext = ext->next) {
-            if (ext->ext.len <= len) {
-                if (ext->exact_match) {
-                    if (memcmp(name - ext->ext.len, ext->ext.string,
-                               ext->ext.len) == 0)
+        if (ext_table_ok && len > 0) {
+            const struct ext_bucket *b =
+                &ext_buckets[fold_byte((unsigned char)name[-1])];
+            for (size_t i = 0; i < b->n; i++) {
+                struct color_ext_type *e = b->v[i];
+                if (e->ext.len <= len) {
+                    if (e->exact_match
+                        ? memcmp(name - e->ext.len, e->ext.string,
+                                 e->ext.len) == 0
+                        : liszt_strncasecmp_c(name - e->ext.len,
+                                              e->ext.string,
+                                              e->ext.len) == 0) {
+                        ext = e;
                         break;
-                } else {
-                    if (liszt_strncasecmp_c(name - ext->ext.len,
-                                            ext->ext.string,
-                                            ext->ext.len) == 0)
-                        break;
+                    }
+                }
+            }
+        } else {
+            for (ext = color_ext_list; ext != NULL; ext = ext->next) {
+                if (ext->ext.len <= len) {
+                    if (ext->exact_match) {
+                        if (memcmp(name - ext->ext.len, ext->ext.string,
+                                   ext->ext.len) == 0)
+                            break;
+                    } else {
+                        if (liszt_strncasecmp_c(name - ext->ext.len,
+                                                ext->ext.string,
+                                                ext->ext.len) == 0)
+                            break;
+                    }
                 }
             }
         }
