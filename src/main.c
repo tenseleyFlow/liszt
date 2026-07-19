@@ -330,6 +330,7 @@ emit_name_colored(const struct litem *it, bool symlink_target,
     const char *bytes;
     size_t blen;
     bool padded;
+    bool would_pad;
 
     if (symlink_target) {
         int tw;
@@ -337,11 +338,17 @@ emit_name_colored(const struct litem *it, bool symlink_target,
         bytes = liszt_quote_name(it->linkname, &cur_opts->filename_qopts,
                                  cur_opts->qmark_funny_chars, false,
                                  &blen, &tw, &tq);
+        /* Targets never emit the alignment pad, but GNU's skip_quotes
+           decision still uses the would-pad value from the target's
+           own quotedness. */
         padded = false;
+        would_pad = cur_opts->align_variable_outer_quotes
+            && cur_some_quoted && !tq;
     } else {
         bytes = it->qname;
         blen = it->qlen;
         padded = it->padded;
+        would_pad = padded;
     }
 
     const struct liszt_binstr *color = NULL;
@@ -374,7 +381,7 @@ emit_name_colored(const struct litem *it, bool symlink_target,
     bool skip_quotes = false;
     if (it->absolute_name) {
         if (cur_opts->align_variable_outer_quotes && cur_some_quoted
-            && !padded) {
+            && !would_pad) {
             skip_quotes = true;
             liszt_emit_byte(bytes[0]);
         }
