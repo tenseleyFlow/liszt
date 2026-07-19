@@ -89,6 +89,8 @@ statx_mask(unsigned wants)
         mask |= STATX_BLOCKS;
     if (wants & LISZT_WANT_INO)
         mask |= STATX_INO;
+    if (wants & LISZT_WANT_MTIME)
+        mask |= STATX_MTIME;
     return mask;
 }
 
@@ -131,6 +133,8 @@ liszt_statx_path(const char *path, unsigned wants, bool follow,
         out->time.tv_nsec = stx.stx_mtime.tv_nsec;
         break;
     }
+    out->mtime.tv_sec = stx.stx_mtime.tv_sec;
+    out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
     out->blocks = (blkcnt_t)stx.stx_blocks;
     out->ino = stx.stx_ino;
     out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);
@@ -171,6 +175,7 @@ fill(const struct stat *st, struct liszt_statinfo *out)
         out->time = ST_MTIMESPEC(st);
         break;
     }
+    out->mtime = ST_MTIMESPEC(st);
     out->blocks = st->st_blocks;
     out->ino = st->st_ino;
     out->dev = st->st_dev;
@@ -315,6 +320,8 @@ liszt_fstat(int fd, struct liszt_statinfo *out)
     out->size = (off_t)stx.stx_size;
     out->time.tv_sec = stx.stx_mtime.tv_sec;
     out->time.tv_nsec = stx.stx_mtime.tv_nsec;
+    out->mtime.tv_sec = stx.stx_mtime.tv_sec;
+    out->mtime.tv_nsec = stx.stx_mtime.tv_nsec;
     out->blocks = (blkcnt_t)stx.stx_blocks;
     out->ino = stx.stx_ino;
     out->dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);

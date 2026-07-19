@@ -1034,6 +1034,12 @@ run_case 11 "ext guard --tre unrecognized" C 2 -- --tre
 run_case 11 "ext guard --ic unrecognized" C 2 -- --ic
 run_case 11 "ext guard --le unrecognized" C 2 -- --le
 
+# 14: git-flag invisibility. "--no" must still reach GNU's matcher and
+# act as --no-group despite the exact-match "no-git" row; "--git-i" is
+# no one's option.
+run_case 14 "ext guard --no prefixes no-group" C 0 -- --no -lU1 "$fix/plain"
+run_case 14 "ext guard --git-i unrecognized" C 2 -- --git-i
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

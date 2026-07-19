@@ -31,6 +31,8 @@ struct liszt_statinfo {
                                liszt_xstat_time_type); GNU stores btime
                                in st_mtim the same way. (-1,-1) = birth
                                time requested but unavailable. */
+    struct timespec mtime;  /* always the modification time: --git
+                               compares it while -u/-c reroute .time */
     blkcnt_t blocks;    /* 512-byte units (ST_NBLOCKSIZE) */
     ino_t ino;
     dev_t dev;
@@ -49,9 +51,10 @@ enum {
     LISZT_WANT_SIZE = 1 << 4,
     LISZT_WANT_TIME = 1 << 5,   /* the selected timestamp */
     LISZT_WANT_BLOCKS = 1 << 6,
-    LISZT_WANT_INO = 1 << 7
+    LISZT_WANT_INO = 1 << 7,
+    LISZT_WANT_MTIME = 1 << 8   /* .mtime, regardless of time_type */
 };
-#define LISZT_WANT_ALL 0xff
+#define LISZT_WANT_ALL 0x1ff
 
 /* Stat DIR/NAME (join via an internal reusable buffer) or a whole PATH.
    FOLLOW selects stat vs lstat semantics. Return 0 or -1 with errno. */

@@ -119,7 +119,10 @@ enum {
     KEY_TREE,
     KEY_LEVEL,
     KEY_TREE_LIMIT,
-    KEY_TREE_GLYPHS
+    KEY_TREE_GLYPHS,
+    KEY_GIT,
+    KEY_GIT_IGNORE,
+    KEY_NO_GIT
 };
 
 static const struct longopt ext_longopts[] = {
@@ -128,7 +131,9 @@ static const struct longopt ext_longopts[] = {
     {"level", ARG_REQ, KEY_LEVEL},
     {"tree-limit", ARG_REQ, KEY_TREE_LIMIT},
     {"tree-glyphs", ARG_REQ, KEY_TREE_GLYPHS},
-    /* Rows land with their sprints (14: git). */
+    {"git", ARG_NO, KEY_GIT},
+    {"git-ignore", ARG_NO, KEY_GIT_IGNORE},
+    {"no-git", ARG_NO, KEY_NO_GIT},
     {NULL, ARG_NO, 0},
 };
 enum { N_EXT_LONGOPTS = sizeof ext_longopts / sizeof ext_longopts[0] - 1 };
@@ -204,6 +209,8 @@ struct staging {
     long tree_level;                /* -1 unset; 0 = unlimited */
     long tree_limit;                /* -1 unset; 0 = uncapped */
     int tree_glyphs;                /* -1 auto, 0 ascii, 1 unicode */
+    int git_opt;                    /* -1 unset, 0 --no-git, 1 --git */
+    bool git_ignore;
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -392,6 +399,9 @@ print_help(void)
     printf("      --level=N           descend at most N levels (0 = unlimited)\n");
     printf("      --tree-limit=N      at most N entries per dir, then '... K more'\n");
     printf("      --tree-glyphs=WORD  unicode, ascii, or auto (locale codeset)\n");
+    printf("      --git               two-char git status column (long format)\n");
+    printf("      --git-ignore        hide gitignored entries (any format)\n");
+    printf("      --no-git            suppress an earlier --git\n");
     exit(LISZT_STATUS_OK);
 }
 
@@ -482,6 +492,15 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_TREE:
         st->tree = true;
+        break;
+    case KEY_GIT:
+        st->git_opt = 1;
+        break;
+    case KEY_NO_GIT:
+        st->git_opt = 0;
+        break;
+    case KEY_GIT_IGNORE:
+        st->git_ignore = true;
         break;
     case KEY_LEVEL:
     case KEY_TREE_LIMIT: {
@@ -905,6 +924,8 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .tree_level = -1,
         .tree_limit = -1,
         .tree_glyphs = -1,
+        .git_opt = -1,
+        .git_ignore = false,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -1032,6 +1053,11 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     }
     if (o->tree && o->format != LISZT_FMT_LONG)
         o->format = LISZT_FMT_ONE;
+    /* --git: a column in long format only, silently inert otherwise
+       (eza semantics); --no-git is the positional suppressor.
+       --git-ignore filters in any format and does not imply --git. */
+    o->show_git = st.git_opt == 1 && o->format == LISZT_FMT_LONG;
+    o->git_ignore = st.git_ignore;
     o->dired = st.dired && o->format == LISZT_FMT_LONG
         && !o->print_hyperlink && !o->print_icons && !o->tree;
     if (o->eolbyte == 0 && o->dired)

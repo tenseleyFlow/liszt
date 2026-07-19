@@ -39,6 +39,10 @@ select_fetch_set(const struct liszt_options *o, struct liszt_plan *p)
         if (o->sort == LISZT_SORT_SIZE)
             wants |= LISZT_WANT_SIZE;
     }
+    /* --git compares mtime while .time may carry atime/ctime; the
+       same statx call grows one mask bit, zero extra syscalls. */
+    if (o->show_git)
+        wants |= LISZT_WANT_MTIME;
     p->needs_stat = wants != 0;
     p->stat_wants = wants;
     p->needs_link_target = long_fmt;

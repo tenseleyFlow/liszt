@@ -365,6 +365,17 @@ else
     note_fail "gitignore driver failed to compile"
 fi
 
+# Git identity guard: without --git/--git-ignore, liszt must never
+# open anything under a .git directory (repo discovery, index reads).
+# Entry stats OF a .git dirent are legitimate; the slash is the tell.
+if command -v strace >/dev/null 2>&1 && [ -d .git ]; then
+    checks=$((checks + 1))
+    ngit=$(strace -f -e trace=openat,open,statx,newfstatat env LC_ALL=C         ./liszt -la . 2>&1 >/dev/null | grep -c '\.git/') || true
+    if [ "${ngit:-1}" -ne 0 ]; then
+        note_fail "flagless run touched .git/ contents ($ngit calls)"
+    fi
+fi
+
 # Git index parser (sprint 14B): synthetic v2/v3 images built in the
 # driver - parse, sorted-order verify, status compare table, window
 # lookups, and corrupt-at-every-boundary degrades (never a crash).
