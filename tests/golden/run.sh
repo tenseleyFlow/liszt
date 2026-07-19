@@ -215,6 +215,55 @@ mkdir -p "$work/empty" "$work/dotonly"
 printf 'x\n' > "$work/dotonly/.a"
 printf 'x\n' > "$work/dotonly/.b"
 
+# Deviation fixture: names whose widths GNU rejects (control byte,
+# invalid multibyte) plus plain ASCII - deliberately free of exotic
+# code points so expected bytes are identical across platform libcs.
+mkdir -p "$work/devdir"
+for n in aa bb cc dd ee ff; do printf 'x\n' > "$work/devdir/$n"; done
+printf 'x\n' > "$work/devdir/$(printf 'ctl\007x')"
+{ printf 'x\n' > "$work/devdir/$(printf 'inv\200x')"; } 2>/dev/null || true
+
+# run_case_dev SLUG SPRINT desc locale wantrc -- args...
+# Deviation registry (.docs/deviations.md): liszt must match the pinned
+# expected bytes, the oracle must still DIFFER (an upstream fix fails
+# loudly), and exit codes must agree.
+run_case_dev() {
+    slug="$1" tag="$2" desc="$3" lc="$4" wantrc="$5"
+    shift 5
+    [ "$1" = "--" ] && shift
+    [ "$tag" -le "$active" ] || return 0
+    [ "$tables_ok" -eq 1 ] || return 0
+    cases=$((cases + 1))
+    exp="tests/golden/deviations/$slug.out"
+    run_pinned "$lc" "$work/liszt.uut" "$@" > "$work/u.out" 2>/dev/null
+    urc=$?
+    run_pinned "$lc" "$oracle" "$@" > "$work/o.out" 2>/dev/null
+    orc=$?
+    ok=1
+    [ "$urc" -eq "$orc" ] || ok=0
+    if [ "$wantrc" != "-" ] && [ "$urc" -ne "$wantrc" ]; then
+        ok=0
+    fi
+    if [ ! -f "$exp" ]; then
+        echo "DEV CASE MISSING EXPECTED [$desc]: $exp" >&2
+        echo "  (generate with the current binary after review)" >&2
+        fails=$((fails + 1))
+        return
+    fi
+    cmp -s "$work/u.out" "$exp" || ok=0
+    if cmp -s "$work/u.out" "$work/o.out"; then
+        echo "DEVIATION VANISHED [$desc]: oracle now matches liszt;" \
+            "re-evaluate .docs/deviations.md" >&2
+        fails=$((fails + 1))
+        return
+    fi
+    if [ "$ok" -ne 1 ]; then
+        echo "DEV CASE FAIL [$desc] (rc uut=$urc oracle=$orc)" >&2
+        diff -u "$exp" "$work/u.out" | sed -n '1,10p' >&2
+        fails=$((fails + 1))
+    fi
+}
+
 # Case matrix. Tags are owning sprints. All cases pipe stdout and pin env
 # via run_pinned; -U throughout until sprint 02 lands sorting.
 U8="${utf8_locale:-C}"
@@ -350,12 +399,12 @@ run_case 4 "-C plain w200" C 0 -- -C -w 200 "$fix/plain"
 run_case 4 "-C plain w1" C 0 -- -C -w 1 "$fix/plain"
 run_case 4 "-C w0 unlimited" C 0 -- -C -w 0 -a "$fix/shapes"
 run_case 4 "-C shapes -a" C 0 -- -Ca -w 80 "$fix/shapes"
-run_case 4 "-C shapes -a utf8" "$U8" 0 -- -Ca -w 80 "$fix/shapes"
-run_case_tables 4 "-C shapes -a dict" "$D8" 0 -- -Ca -w 80 "$fix/shapes"
+run_case 4 "-C versions -a utf8" "$U8" 0 -- -Ca -w 80 "$fix/versions"
+run_case 4 "-C plain dict" "$D8" 0 -- -Ca -w 80 "$fix/plain"
 run_case 4 "-x shapes" C 0 -- -xa -w 80 "$fix/shapes"
-run_case_tables 4 "-x shapes dict" "$D8" 0 -- -xa -w 80 "$fix/shapes"
+run_case 4 "-x versions dict" "$D8" 0 -- -xa -w 80 "$fix/versions"
 run_case 4 "-m plain" C 0 -- -m -w 80 "$fix/plain"
-run_case_tables 4 "-m shapes dict" "$D8" 0 -- -ma -w 80 "$fix/shapes"
+run_case 4 "-m versions dict" "$D8" 0 -- -ma -w 80 "$fix/versions"
 run_case 4 "-m width20" C 0 -- -ma -w 20 "$fix/shapes"
 run_case 4 "-Cs frills" C 0 -- -Csa -w 80 "$fix/sizes"
 run_case 4 "-Ci frills" C 0 -- -Ci -w 80 "$fix/plain"
@@ -391,6 +440,14 @@ run_case 4 "sort width" C 0 -- -1a --sort=width "$fix/shapes"
 run_case_tables 4 "sort width dict" "$D8" 0 -- -1a --sort=width "$fix/shapes"
 run_case 4 "sort width -C" C 0 -- -Ca -w 80 --sort=width "$fix/shapes"
 run_case 4 "sort width -r" C 0 -- -1ar --sort=width "$fix/plain"
+run_case 4 "weird missing operand quoteaf" C 2 -- -1 "$work/no such\
+byte operand"
+
+# 04 deviation registry (D1): rejected widths clamp to 0, GNU wraps.
+# (--sort=width needs no case: SIZE_MAX and 0 order identically.)
+run_case_dev d1-columns 4 "D1 -C devdir" "$U8" 0 -- -Ca -w 20 "$work/devdir"
+run_case_dev d1-across 4 "D1 -x devdir" "$U8" 0 -- -xa -w 20 "$work/devdir"
+run_case_dev d1-commas 4 "D1 -m devdir" "$U8" 0 -- -ma -w 12 "$work/devdir"
 
 # 04 bespoke: env-driven width/tabsize/quoting.
 if [ 4 -le "$active" ]; then
@@ -399,10 +456,10 @@ if [ 4 -le "$active" ]; then
         cases=$((cases + 1))
         env -i PATH="$PATH" LC_ALL=C TZ=UTC0 LS_COLORS= \
             LISZT_DEBUG_VERIFY=1 "$envspec" \
-            "$work/liszt.uut" -Ca "$fix/shapes" > "$work/u.out" 2> "$work/u.raw"
+            "$work/liszt.uut" -Ca "$fix/plain" > "$work/u.out" 2> "$work/u.raw"
         urc=$?
         env -i PATH="$PATH" LC_ALL=C TZ=UTC0 LS_COLORS= "$envspec" \
-            "$oracle" -Ca "$fix/shapes" > "$work/o.out" 2> "$work/o.raw"
+            "$oracle" -Ca "$fix/plain" > "$work/o.out" 2> "$work/o.raw"
         orc=$?
         normprog < "$work/u.raw" > "$work/u.err"
         normprog < "$work/o.raw" > "$work/o.err"

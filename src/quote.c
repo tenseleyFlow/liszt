@@ -601,11 +601,15 @@ liszt_quote_name(const char *name, const struct liszt_qopts *opts,
         }
     } else if (want_width) {
         if (MB_CUR_MAX > 1) {
-            /* GNU quirk (pinned): mbsnwidth's -1 lands in a size_t
-               before the MAX(0,..) clamp, so rejected names carry
-               SIZE_MAX and wrap through the layout arithmetic. The -1
-               sentinel here becomes (size_t)-1 at the size_t callers. */
+            /* Deviation D1 (.docs/deviations.md): GNU assigns
+               mbsnwidth's -1 into a size_t before its MAX(0,..) clamp,
+               so rejected names carry SIZE_MAX and wrap through layout
+               arithmetic (broken alignment near control-byte and
+               invalid-multibyte names). liszt honors the clamp GNU's
+               dead code intended. */
             displayed_width = liszt_mbsnwidth(qbuf, len);
+            if (displayed_width < 0)
+                displayed_width = 0;
         } else {
             const char *p = qbuf;
             const char *plimit = qbuf + len;

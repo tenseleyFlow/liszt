@@ -33,14 +33,36 @@ static struct liszt_plan plan;
 static const struct liszt_options *cur_opts;
 static bool cur_some_quoted;
 
+/* GNU quoteaf: shell-escape-always rendering for diagnostics. Static
+   rotating buffer, two slots. */
+static const char *
+quote_af(const char *name)
+{
+    static char *slots[2];
+    static size_t caps[2];
+    static int turn;
+    static const struct liszt_qopts af_opts = {
+        .style = LISZT_QS_SHELL_ESCAPE_ALWAYS
+    };
+
+    turn = 1 - turn;
+    size_t need = liszt_quotearg_buffer(slots[turn], caps[turn], name,
+                                        (size_t)-1, &af_opts);
+    if (need >= caps[turn]) {
+        caps[turn] = need + 1;
+        slots[turn] = liszt_xrealloc(slots[turn], caps[turn]);
+        liszt_quotearg_buffer(slots[turn], caps[turn], name, (size_t)-1,
+                              &af_opts);
+    }
+    return slots[turn];
+}
+
 static void
 file_failure(bool serious, const char *fmt_with_name, const char *name,
              int errnum)
 {
-    /* GNU quotes shell-escape-always style; the simple-name subset is
-       what current fixtures exercise (sprint 04 owns full quoting). */
     fprintf(stderr, "%s: ", liszt_prog);
-    fprintf(stderr, fmt_with_name, name);
+    fprintf(stderr, fmt_with_name, quote_af(name));
     fprintf(stderr, ": %s\n", strerror(errnum));
     liszt_set_exit_status(serious);
 }
@@ -371,7 +393,7 @@ operand_item(const void *p, struct liszt_item *out)
     out->name = op->name;
     out->size = op->st.size;
     out->mtime = op->st.mtime;
-    out->width = (int)((size_t)(ptrdiff_t)op->disp_width + op->padded);
+    out->width = op->disp_width + op->padded;
     out->group_dir = false;     /* grouping cannot affect operand output */
 }
 
@@ -504,7 +526,7 @@ classify_operand(const char *name, const struct liszt_options *o,
     }
 
     if (err != 0) {
-        file_failure(true, "cannot access '%s'", name, errno);
+        file_failure(true, "cannot access %s", name, errno);
         return false;
     }
     out->name = name;
@@ -519,7 +541,7 @@ classify_operand(const char *name, const struct liszt_options *o,
     if (plan.needs_link_target && out->ftype == LISZT_T_LNK) {
         out->linkname = liszt_readlink_join("", name);
         if (!out->linkname)
-            file_failure(false, "cannot read symbolic link '%s'",
+            file_failure(false, "cannot read symbolic link %s",
                          name, errno);
     }
     if (plan.needs_xattr)
@@ -539,8 +561,8 @@ on_dirread_fail(void *ctx, enum liszt_dirread_fail how, int errnum)
 {
     struct dir_diag_ctx *dc = ctx;
     file_failure(dc->command_line,
-                 how == LISZT_DIRFAIL_READ ? "reading directory '%s'"
-                                           : "closing directory '%s'",
+                 how == LISZT_DIRFAIL_READ ? "reading directory %s"
+                                           : "closing directory %s",
                  dc->name, errnum);
 }
 
@@ -570,7 +592,7 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 if (plan.stat_wants & LISZT_WANT_MODE)
                     e->ftype = (uint8_t)ftype_from_mode(m->st.mode);
             } else {
-                file_failure(false, "cannot access '%s'",
+                file_failure(false, "cannot access %s",
                              liszt_join_path(dirname, nm), errno);
                 continue;
             }
@@ -583,7 +605,7 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                                                           strlen(target));
                     free(target);
                 } else {
-                    file_failure(false, "cannot read symbolic link '%s'",
+                    file_failure(false, "cannot read symbolic link %s",
                                  liszt_join_path(dirname, nm), errno);
                 }
             }
@@ -717,9 +739,7 @@ item_length(const struct liszt_options *o, const struct lwidths *w,
                              o->output_block_size))
                        : 1)
                     : (size_t)w->blocks);
-    /* GNU quote_name_width returns width + pad in size_t: a rejected
-       width (-1 sentinel) becomes SIZE_MAX and pad can wrap it to 0. */
-    len += (size_t)(ptrdiff_t)it->width + it->padded;
+    len += (size_t)(it->width + it->padded);
     return len;
 }
 
@@ -815,7 +835,7 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
 
     if (liszt_dirread_collect(name, o->ignore, es, on_dirread_fail, &dc)
         < 0) {
-        file_failure(command_line, "cannot open directory '%s'", name,
+        file_failure(command_line, "cannot open directory %s", name,
                      errno);
         return;
     }

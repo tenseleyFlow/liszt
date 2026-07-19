@@ -8,9 +8,9 @@
 # (rank's precedent; tally's C generator is the upgrade path if
 # cross-platform repro ever matters).
 #
-# Missing-operand names stay in the simple-name class until sprint 04
-# lands full diagnostic quoting (quoteaf); existing-file names use every
-# shape class - stdout passes raw bytes through.
+# Diagnostics render through the quotearg port (quoteaf) since 04F, so
+# missing-operand names may take any shape; existing-file names use
+# every class - stdout passes raw bytes through.
 #
 # Env: FUZZ_TRIALS (default 100), FUZZ_SEED (default 42).
 # Exit: 0 pass, 1 fail, 77 skip (no oracle).
@@ -54,6 +54,22 @@ gen_plan() {
         srand(seed + trial)
         r = int(rand() * 1000000)
 
+        # Deviation D1: liszt intentionally diverges from GNU when raw
+        # control bytes meet width-using layout (see .docs/deviations.md),
+        # so those combinations are excluded from differential trials.
+        # The layout/quoting shape is drawn FIRST so name classes can
+        # avoid raw control bytes when D1 would fire.
+        fmtpick = rand()
+        stylepick = rand()
+        si = 0
+        if (stylepick < 0.35) si = int(rand() * 10) + 1
+        qpick = rand()
+        widthsort = rand()
+        layoutish = (fmtpick >= 0.5 && fmtpick < 0.85) || widthsort < 0.1
+        styled = si >= 4    # styles that escape control bytes
+        qmark = qpick < 0.2
+        avoid_ctl = layoutish && !styled && !qmark
+
         alpha = "abcdefghijklmnopqrstuvwxyz0123456789"
         nfiles = int(rand() * 25)
         for (i = 0; i < nfiles; i++) {
@@ -69,6 +85,9 @@ gen_plan() {
                     else name = name substr(alpha, int(rand() * 36) + 1, 1)
                 }
                 sub(/^ /, "x", name)             # avoid confusing ls args
+            } else if (cls == 3 && avoid_ctl) {  # D1: reroll to plain
+                for (j = 0; j < len; j++)
+                    name = name substr(alpha, int(rand() * 36) + 1, 1)
             } else if (cls == 3) {               # control bytes
                 name = "c"
                 ctl = "\\011:\\033:\\007:\\013"
@@ -99,6 +118,7 @@ gen_plan() {
         # Sort surface (sprint 02): every implemented word plus -r,
         # -f, and grouping.
         p = rand()
+        avoid_ctl = 0
         if (p < 0.25) flags = "-U"
         else if (p < 0.35) flags = "-t"
         else if (p < 0.45) flags = "-S"
@@ -109,7 +129,7 @@ gen_plan() {
         else flags = ""             # default name sort
         if (rand() < 0.3) flags = flags " -r"
         if (rand() < 0.25) flags = flags " --group-directories-first"
-        p = rand()
+        p = fmtpick
         if (p < 0.2) flags = flags " -1"
         else if (p < 0.3) flags = flags " --format=single-column"
         else if (p < 0.5) flags = flags " -l"
@@ -117,15 +137,14 @@ gen_plan() {
         else if (p < 0.75) flags = flags " -x -w " int(rand() * 100)
         else if (p < 0.85) flags = flags " -m -w " int(rand() * 100)
         # else: piped default resolves to one-per-line
-        p = rand()
-        if (p < 0.35) {
+        if (si > 0) {
             split("literal shell shell-always shell-escape " \
                   "shell-escape-always c c-maybe escape locale clocale",
                   qsty, " ")
-            flags = flags " --quoting-style=" qsty[int(rand() * 10) + 1]
+            flags = flags " --quoting-style=" qsty[si]
         }
-        if (rand() < 0.2) flags = flags " -q"
-        if (rand() < 0.1) flags = flags " --sort=width"
+        if (qmark) flags = flags " -q"
+        if (widthsort < 0.1) flags = flags " --sort=width"
         p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
@@ -203,8 +222,7 @@ EOF
         : # default sort, no flag words
     fi
     if [ "$style" = "permuted" ]; then
-        args_ops="$*"
-        set -- $args_ops $flags
+        set -- "$@" $flags
     else
         set -- $flags "$@"
     fi
