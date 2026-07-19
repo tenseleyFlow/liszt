@@ -40,6 +40,15 @@ static struct liszt_plan plan;
 static const struct liszt_options *cur_opts;
 static bool cur_some_quoted;
 
+/* Tree-mode branch column, published by the walker and emitted
+   immediately before the name in both long and short entries. Empty in
+   GNU mode and on tree root lines - a no-op there. */
+static struct {
+    const char *bytes;
+    size_t len;                 /* 0 = no column */
+    size_t width;               /* display cells */
+} tree_prefix;
+
 /* --dired accounting: offsets count every emitted byte except escape
    sequences (color, later hyperlink), exactly GNU's dired_pos, whose
    wrappers skip put_indicator output. Pairs bracket long-format names
@@ -655,6 +664,10 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         prefix_len += (size_t)n;
     }
 
+    if (tree_prefix.len) {
+        liszt_emit_bytes(tree_prefix.bytes, tree_prefix.len);
+        prefix_len += tree_prefix.width;
+    }
     size_t nlen = emit_name_colored(it, false, prefix_len);
     /* GNU branches on filetype==symbolic_link FIRST: a symlink with no
        readable target prints neither arrow nor indicator (fuzz-pinned
@@ -696,6 +709,10 @@ emit_short_item(const struct liszt_options *o, const struct lwidths *w,
                          it->scontext);
         liszt_emit_bytes(sbuf, (size_t)n);
         fr += (size_t)n;
+    }
+    if (tree_prefix.len) {
+        liszt_emit_bytes(tree_prefix.bytes, tree_prefix.len);
+        fr += tree_prefix.width;
     }
     emit_name_colored(it, false, start_col + fr);
     if (o->indicator_style != LISZT_IND_NONE) {
@@ -1591,6 +1608,231 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
     emit_entries(o, es, true);
 }
 
+/* --- tree mode (v0.2 extension) --------------------------------------
+
+   Dedicated recursive walker: the pending queue emits batch-per-dir,
+   tree interleaves children between siblings. Per directory: diropen ->
+   fstat loop-detect -> collect (closes the fd) -> fill/decorate/sort ->
+   emit+recurse. One dirfd is live at any moment, at any depth. */
+
+struct tree_glyphs {
+    const char *branch, *last, *run, *blank;    /* all 4 cells wide */
+    size_t branch_len, last_len, run_len, blank_len;
+};
+
+static const struct tree_glyphs tree_glyphs_unicode = {
+    "\xE2\x94\x9C\xE2\x94\x80\xE2\x94\x80 ",
+    "\xE2\x94\x94\xE2\x94\x80\xE2\x94\x80 ",
+    "\xE2\x94\x82   ",
+    "    ",
+    10, 10, 6, 4
+};
+
+static const struct tree_glyphs tree_glyphs_ascii = {
+    "|-- ", "`-- ", "|   ", "    ",
+    4, 4, 4, 4
+};
+
+/* All walker buffers: per-depth entries pools (cleared and reused
+   across same-depth directories), the walked path, and the single
+   ancestor-run prefix. Peak memory is the active path only. */
+struct tree_ctx {
+    const struct liszt_options *o;
+    const struct tree_glyphs *g;
+    struct liszt_entries *levels;
+    size_t n_levels;
+    char *path;
+    size_t path_len, path_cap;
+    char *prefix;
+    size_t prefix_len, prefix_cap;
+    size_t prefix_width;
+    bool ops_some_quoted;       /* operand-batch snapshot for root lines */
+};
+
+static void
+tree_prefix_append(struct tree_ctx *tc, const char *g, size_t glen)
+{
+    if (tc->prefix_len + glen > tc->prefix_cap) {
+        tc->prefix_cap = (tc->prefix_len + glen) * 2 + 64;
+        tc->prefix = liszt_xrealloc(tc->prefix, tc->prefix_cap);
+    }
+    memcpy(tc->prefix + tc->prefix_len, g, glen);
+    tc->prefix_len += glen;
+    tc->prefix_width += 4;
+}
+
+/* Republished before every emit: recursion can realloc the buffer. */
+static void
+tree_publish_prefix(const struct tree_ctx *tc)
+{
+    tree_prefix.bytes = tc->prefix;
+    tree_prefix.len = tc->prefix_len;
+    tree_prefix.width = tc->prefix_width;
+}
+
+static struct liszt_entries *
+tree_level_pool(struct tree_ctx *tc, size_t depth)
+{
+    if (depth >= tc->n_levels) {
+        tc->levels = liszt_xrealloc(tc->levels,
+                                    (depth + 1) * sizeof *tc->levels);
+        while (tc->n_levels <= depth)
+            liszt_entries_init(&tc->levels[tc->n_levels++]);
+    }
+    return &tc->levels[depth];
+}
+
+static void
+tree_path_push(struct tree_ctx *tc, const char *name, size_t len,
+               size_t *save)
+{
+    *save = tc->path_len;
+    if (tc->path_len + len + 2 > tc->path_cap) {
+        tc->path_cap = (tc->path_len + len + 2) * 2;
+        tc->path = liszt_xrealloc(tc->path, tc->path_cap);
+    }
+    if (tc->path_len && tc->path[tc->path_len - 1] != '/')
+        tc->path[tc->path_len++] = '/';
+    memcpy(tc->path + tc->path_len, name, len);
+    tc->path_len += len;
+    tc->path[tc->path_len] = '\0';
+}
+
+/* List the directory at tc->path, whose entries sit at DEPTH (root
+   operand line = depth 0). Entered iff --level is 0 or depth < level:
+   boundary dirs at the level are shown, never entered. */
+static void
+tree_walk(struct tree_ctx *tc, size_t depth, bool command_line)
+{
+    const struct liszt_options *o = tc->o;
+    struct liszt_dir *dh;
+
+    if (liszt_diropen(tc->path, &dh) < 0) {
+        file_failure(command_line, "cannot open directory %s", tc->path,
+                     errno);
+        return;
+    }
+    /* Loop detection is unconditional in tree mode: bind-mount cycles
+       need no -L to recurse forever. */
+    struct liszt_statinfo di;
+    if (liszt_fstat(liszt_dirfd(dh), &di) < 0) {
+        file_failure(command_line,
+                     "cannot determine device and inode of %s",
+                     tc->path, errno);
+        liszt_dirclose(dh);
+        return;
+    }
+    if (visit_dir(di.dev, di.ino)) {
+        fprintf(stderr, "%s: %s: not listing already-listed"
+                " directory\n", liszt_prog, quote_f(tc->path));
+        liszt_dirclose(dh);
+        liszt_set_exit_status(true);
+        return;
+    }
+
+    struct dir_diag_ctx dc = { tc->path, command_line };
+    struct liszt_ignore_spec ig = {
+        .mode = o->ignore,
+        .hide = o->hide_patterns,
+        .n_hide = o->n_hide_patterns,
+        .ignore = o->ignore_patterns,
+        .n_ignore = o->n_ignore_patterns
+    };
+    struct liszt_entries *es = tree_level_pool(tc, depth);
+    liszt_dirread_collect_from(dh, &ig, es, on_dirread_fail, &dc);
+
+    fill_meta(tc->path, o, es);
+    decorate_entries(o, es);
+    /* HAZARD (locked): cur_some_quoted is written at decorate and read
+       at emit, and child decoration runs between parent emissions -
+       snapshot here, restore before every emit and after every
+       recursion. */
+    bool some_quoted = cur_some_quoted;
+    liszt_sort_entries(es);
+
+    struct lwidths w = { 0 };
+    if (needs_columns(o)) {
+        struct litem wit;
+        for (size_t i = 0; i < es->len; i++) {
+            entry_to_item(es, &es->v[i], &wit);
+            widths_add(&w, o, &wit);
+        }
+    }
+
+    size_t psave = tc->prefix_len;
+    size_t pwsave = tc->prefix_width;
+    for (size_t i = 0; i < es->len; i++) {
+        struct litem it;
+        entry_to_item(es, &es->v[i], &it);
+        bool last_sib = i == es->len - 1;
+
+        tree_prefix_append(tc, last_sib ? tc->g->last : tc->g->branch,
+                           last_sib ? tc->g->last_len
+                                    : tc->g->branch_len);
+        tree_publish_prefix(tc);
+        cur_some_quoted = some_quoted;
+        emit_item(o, &w, &it);
+        tc->prefix_len = psave;
+        tc->prefix_width = pwsave;
+
+        const char *nm = it.name;
+        bool dot_entry = nm[0] == '.'
+            && (nm[1] == '\0' || (nm[1] == '.' && nm[2] == '\0'));
+        if (es->v[i].ftype == LISZT_T_DIR && !dot_entry
+            && (o->tree_level == 0 || depth < o->tree_level)) {
+            tree_prefix_append(tc, last_sib ? tc->g->blank : tc->g->run,
+                               last_sib ? tc->g->blank_len
+                                        : tc->g->run_len);
+            size_t sv;
+            tree_path_push(tc, nm, es->v[i].name_len, &sv);
+            tree_walk(tc, depth + 1, false);
+            /* Recursion can grow the levels array; the pool's own
+               buffers never move, but the struct does. */
+            es = &tc->levels[depth];
+            tc->path_len = sv;
+            tc->path[sv] = '\0';
+            tc->prefix_len = psave;
+            tc->prefix_width = pwsave;
+            cur_some_quoted = some_quoted;
+        }
+    }
+    pop_active_dir();
+}
+
+/* Root line via the normal operand->litem path: empty prefix, its own
+   single-item widths. */
+static void
+tree_root(struct tree_ctx *tc, const struct operand *op, bool *first)
+{
+    const struct liszt_options *o = tc->o;
+
+    if (!*first)
+        liszt_emit_byte('\n');
+    *first = false;
+
+    struct litem it;
+    operand_to_litem(op, &it);
+    struct lwidths w = { 0 };
+    if (needs_columns(o))
+        widths_add(&w, o, &it);
+    tree_prefix.bytes = NULL;
+    tree_prefix.len = 0;
+    tree_prefix.width = 0;
+    cur_some_quoted = tc->ops_some_quoted;
+    emit_item(o, &w, &it);
+
+    size_t nlen = strlen(op->name);
+    if (nlen + 1 > tc->path_cap) {
+        tc->path_cap = nlen + 64;
+        tc->path = liszt_xrealloc(tc->path, tc->path_cap);
+    }
+    memcpy(tc->path, op->name, nlen + 1);
+    tc->path_len = nlen;
+    tc->prefix_len = 0;
+    tc->prefix_width = 0;
+    tree_walk(tc, 1, true);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1705,6 +1947,45 @@ main(int argc, char **argv)
     liszt_entries_init(&es);
     bool first = true;
 
+    if (o.tree) {
+        /* Tree mode replaces the queue seed/drain; -d wins upstream by
+           never classifying dir operands as extractable. The implicit
+           "." is classified explicitly - the root line renders it. */
+        struct tree_ctx tc = {
+            .o = &o,
+            .g = o.tree_unicode ? &tree_glyphs_unicode
+                                : &tree_glyphs_ascii,
+            .ops_some_quoted = ops_some_quoted,
+        };
+        struct operand dot;
+        bool have_dot = false;
+        if (implicit_dot && classify_operand(".", &o, &dot)) {
+            decorate_operands(&o, &dot, 1);
+            tc.ops_some_quoted = cur_some_quoted;
+            have_dot = true;
+        }
+        if (have_dot) {
+            tree_root(&tc, &dot, &first);
+        } else {
+            for (int i = 0; i < n_ops; i++)
+                if (ops[i].is_dir)
+                    tree_root(&tc, &ops[i], &first);
+        }
+        tree_prefix.bytes = NULL;
+        tree_prefix.len = 0;
+        tree_prefix.width = 0;
+        for (size_t i = 0; i < tc.n_levels; i++)
+            liszt_entries_free(&tc.levels[i]);
+        free(tc.levels);
+        free(tc.path);
+        free(tc.prefix);
+        if (have_dot) {
+            free(dot.linkname);
+            free(dot.qname);
+            free(dot.absolute_name);
+            free(dot.scontext);
+        }
+    } else {
     /* Seed the pending queue with command-line directories in reverse
        (the LIFO pops them forward), then drain depth-first; markers pop
        the active-ancestor set. */
@@ -1726,6 +2007,7 @@ main(int argc, char **argv)
         }
         free(p->name);
         free(p);
+    }
     }
 
     liszt_entries_free(&es);
