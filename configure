@@ -1,0 +1,120 @@
+#!/bin/sh
+# Hand-written configure for liszt. Writes config.h and config.mk.
+# No autotools. Idempotent. Honors CC.
+
+set -e
+
+LISZT_VERSION="0.0.1"
+
+cc="${CC:-cc}"
+mkdir -p build
+
+# Platform feature macros. _DEFAULT_SOURCE is always in CPPFLAGS (Makefile);
+# Linux additionally needs _GNU_SOURCE for statx/getdents64/syscall under
+# strict C11 (ferret's lesson).
+extra_cppflags=""
+case "$(uname -s)" in
+Linux) extra_cppflags="-D_GNU_SOURCE" ;;
+Darwin) extra_cppflags="-D_DARWIN_C_SOURCE" ;;
+esac
+
+try_compile() {
+    name="$1"
+    code="$2"
+    printf '%s\n' "$code" > "build/probe_$name.c"
+    if "$cc" -std=c11 -D_DEFAULT_SOURCE $extra_cppflags -Wall -Werror \
+        -c -o "build/probe_$name.o" "build/probe_$name.c" 2>/dev/null; then
+        rm -f "build/probe_$name.c" "build/probe_$name.o"
+        return 0
+    fi
+    rm -f "build/probe_$name.c" "build/probe_$name.o"
+    return 1
+}
+
+have_statx=0
+try_compile statx '
+#include <sys/stat.h>
+#include <fcntl.h>
+int probe(void);
+int probe(void) { struct statx sx; return statx(AT_FDCWD, ".", 0, STATX_BASIC_STATS, &sx); }
+' && have_statx=1
+
+have_getdents64=0
+try_compile getdents64 '
+#include <sys/syscall.h>
+#include <unistd.h>
+long probe(void);
+long probe(void) { char buf[64]; return syscall(SYS_getdents64, 0, buf, sizeof buf); }
+' && have_getdents64=1
+
+have_getdirentries=0
+try_compile getdirentries '
+#include <dirent.h>
+#include <sys/types.h>
+long probe(void);
+long probe(void) { char buf[64]; off_t base = 0; return getdirentries(0, buf, sizeof buf, &base); }
+' && have_getdirentries=1
+
+have_d_type=0
+try_compile d_type '
+#include <dirent.h>
+int probe(void);
+int probe(void) { struct dirent d; d.d_type = DT_REG; return d.d_type == DT_REG; }
+' && have_d_type=1
+
+# Linux xattr signature: getxattr(path, name, value, size).
+have_getxattr=0
+try_compile getxattr '
+#include <sys/xattr.h>
+long probe(void);
+long probe(void) { return getxattr(".", "user.x", (void *)0, 0); }
+' && have_getxattr=1
+
+# Darwin xattr signature has options/position parameters.
+have_getxattr_darwin=0
+try_compile getxattr_darwin '
+#include <sys/xattr.h>
+long probe(void);
+long probe(void) { return getxattr(".", "user.x", (void *)0, 0, 0, 0); }
+' && have_getxattr_darwin=1
+
+# FreeBSD extended attributes.
+have_extattr=0
+try_compile extattr '
+#include <sys/types.h>
+#include <sys/extattr.h>
+long probe(void);
+long probe(void) { return extattr_get_file(".", EXTATTR_NAMESPACE_USER, "x", (void *)0, 0); }
+' && have_extattr=1
+
+case "$(uname -m)" in
+x86_64|amd64|aarch64|arm64) endian=little ;;
+*) endian=unknown ;;
+esac
+
+cat > config.h <<EOF
+#ifndef LISZT_CONFIG_H
+#define LISZT_CONFIG_H
+#define LISZT_VERSION "$LISZT_VERSION"
+#define LISZT_HAVE_STATX $have_statx
+#define LISZT_HAVE_GETDENTS64 $have_getdents64
+#define LISZT_HAVE_GETDIRENTRIES $have_getdirentries
+#define LISZT_HAVE_D_TYPE $have_d_type
+#define LISZT_HAVE_GETXATTR $have_getxattr
+#define LISZT_HAVE_GETXATTR_DARWIN $have_getxattr_darwin
+#define LISZT_HAVE_EXTATTR $have_extattr
+#define LISZT_ENDIAN_$endian 1
+#endif
+EOF
+
+cat > config.mk <<EOF
+CC ?= $cc
+EXTRA_CPPFLAGS = $extra_cppflags
+SANITIZE_FLAGS ?= -fsanitize=address,undefined -fno-omit-frame-pointer
+LDLIBS ?=
+EOF
+
+echo "liszt $LISZT_VERSION configured:"
+echo "  cc=$cc"
+echo "  statx=$have_statx getdents64=$have_getdents64 getdirentries=$have_getdirentries d_type=$have_d_type"
+echo "  getxattr=$have_getxattr getxattr_darwin=$have_getxattr_darwin extattr=$have_extattr endian=$endian"

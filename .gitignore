@@ -2,3 +2,15 @@ AGENTS.md
 CLAUDE.md
 .docs/
 .fac/
+
+# build artifacts
+liszt
+lz
+*.o
+*.d
+config.h
+config.mk
+build/
+bench/results/
+tests/.work/
+liszt-*.tar.gz
