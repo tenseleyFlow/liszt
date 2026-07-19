@@ -4,6 +4,7 @@
 #include <locale.h>
 #include <setjmp.h>
 #include <sys/stat.h>
+#include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,8 @@ static struct {
     bool group_dirs;
     enum liszt_sort_plan engine;
     bool use_strcmp;        /* strcoll failed; GNU falls back wholesale */
+    bool in_verify;         /* verify pass: never diagnose, never longjmp */
+    bool verify_skipped;
     jmp_buf failed_strcoll;
     /* Transform arena (engine RADIX_TRANSFORMED). */
     unsigned char *xarena;
@@ -231,6 +234,12 @@ name_coll(const char *a, const char *b)
     errno = 0;
     int diff = strcoll(a, b);
     if (errno != 0) {
+        /* The verify oracle must not disturb GNU-parity behavior: on
+           EILSEQ platforms (BSD libc) it silently stands down instead. */
+        if (S.in_verify) {
+            S.verify_skipped = true;
+            return 0;
+        }
         liszt_error(errno, "cannot compare file names %s%s%s and %s%s%s",
                     liszt_qL(), a, liszt_qR(), liszt_qL(), b, liszt_qR());
         liszt_set_exit_status(false);
@@ -327,29 +336,150 @@ entry_cmp(const struct liszt_entry *a, const struct liszt_entry *b)
     return item_cmp(&ia, &ib);
 }
 
-/* Stable top-down merge sort - the scalar engine (GNU uses mpsort, also
-   a stable merge; ties are byte-identical names, so order matches). */
+/* gnulib mpsort, ported verbatim from the pinned tree: GNU's scalar
+   sort. The exact comparison sequence matters - on BSD libc, strcoll can
+   fail with EILSEQ, and byte parity requires failing on the same first
+   pair GNU fails on. */
+typedef int (*mp_cmp)(const void *, const void *);
+
+static void mpsort_with_tmp(const void **base, size_t n, const void **tmp,
+                            mp_cmp cmp);
+
 static void
-merge_range(struct liszt_entry *v, struct liszt_entry *aux, size_t lo,
-            size_t hi)
+mpsort_into_tmp(const void **base, size_t n, const void **tmp, mp_cmp cmp)
 {
-    if (hi - lo < 2)
+    size_t n1 = n / 2;
+    size_t n2 = n - n1;
+    size_t a = 0;
+    size_t alim = n1;
+    size_t b = n1;
+    size_t blim = n;
+
+    mpsort_with_tmp(base + n1, n2, tmp, cmp);
+    mpsort_with_tmp(base, n1, tmp, cmp);
+
+    const void *ba = base[a];
+    const void *bb = base[b];
+
+    for (;;)
+        if (cmp(ba, bb) <= 0) {
+            *tmp++ = ba;
+            a++;
+            if (a == alim) {
+                a = b;
+                alim = blim;
+                break;
+            }
+            ba = base[a];
+        } else {
+            *tmp++ = bb;
+            b++;
+            if (b == blim)
+                break;
+            bb = base[b];
+        }
+
+    memcpy(tmp, base + a, (alim - a) * sizeof *base);
+}
+
+static void
+mpsort_with_tmp(const void **base, size_t n, const void **tmp, mp_cmp cmp)
+{
+    if (n <= 2) {
+        if (n == 2) {
+            const void *p0 = base[0];
+            const void *p1 = base[1];
+            if (!(cmp(p0, p1) <= 0)) {
+                base[0] = p1;
+                base[1] = p0;
+            }
+        }
         return;
-    size_t mid = lo + (hi - lo) / 2;
-    merge_range(v, aux, lo, mid);
-    merge_range(v, aux, mid, hi);
-    memcpy(aux + lo, v + lo, (hi - lo) * sizeof *v);
-    size_t i = lo, j = mid, k = lo;
-    while (i < mid && j < hi) {
-        if (entry_cmp(&aux[j], &aux[i]) < 0)
-            v[k++] = aux[j++];
-        else
-            v[k++] = aux[i++];
     }
-    while (i < mid)
-        v[k++] = aux[i++];
-    while (j < hi)
-        v[k++] = aux[j++];
+
+    size_t n1 = n / 2;
+    size_t t = 0;
+    size_t tlim = n1;
+    size_t b = n1;
+    size_t blim = n;
+
+    mpsort_with_tmp(base + n1, n - n1, tmp, cmp);
+
+    if (n1 < 2)
+        tmp[0] = base[0];
+    else
+        mpsort_into_tmp(base, n1, tmp, cmp);
+
+    const void *tt = tmp[t];
+    const void *bb = base[b];
+
+    for (size_t i = 0;;)
+        if (cmp(tt, bb) <= 0) {
+            base[i++] = tt;
+            t++;
+            if (t == tlim)
+                break;
+            tt = tmp[t];
+        } else {
+            base[i++] = bb;
+            b++;
+            if (b == blim) {
+                memcpy(base + i, tmp + t, (tlim - t) * sizeof *base);
+                break;
+            }
+            bb = base[b];
+        }
+}
+
+static void
+mpsort(const void **base, size_t n, mp_cmp cmp)
+{
+    mpsort_with_tmp(base, n, base + n, cmp);
+}
+
+static int
+entry_ptr_cmp(const void *a, const void *b)
+{
+    return entry_cmp(a, b);
+}
+
+/* Scalar engine: mpsort over entry pointers, written back through aux. */
+static void
+scalar_mpsort_entries(struct liszt_entries *es, struct liszt_entry *aux)
+{
+    size_t n = es->len;
+    const void **ptrs = liszt_xmalloc((n + n / 2) * sizeof *ptrs);
+    for (size_t i = 0; i < n; i++)
+        ptrs[i] = &es->v[i];
+    mpsort(ptrs, n, entry_ptr_cmp);
+    for (size_t i = 0; i < n; i++)
+        aux[i] = *(const struct liszt_entry *)ptrs[i];
+    memcpy(es->v, aux, n * sizeof *aux);
+    free(ptrs);
+}
+
+/* Hard locales can hold names strcoll may reject (EILSEQ on BSD libc);
+   any invalid multibyte name routes the directory to the scalar oracle
+   so failure behavior matches GNU byte for byte. */
+static bool
+any_invalid_multibyte(const struct liszt_entries *es)
+{
+    for (size_t i = 0; i < es->len; i++) {
+        const char *p = liszt_entry_name(es, &es->v[i]);
+        size_t left = es->v[i].name_len;
+        mbstate_t st;
+        memset(&st, 0, sizeof st);
+        while (left > 0) {
+            size_t r = mbrtowc(NULL, p, left, &st);
+            if (r == (size_t)-1 || r == (size_t)-2)
+                return true;
+            if (r == 0)
+                r = 1;
+            p += r;
+            left -= r;
+        }
+    }
+    return false;
 }
 
 /* --- byte radix over name spans (engine RADIX_BYTES) ------------------ */
@@ -747,11 +877,21 @@ numeric_sort_range(struct liszt_entries *es, struct liszt_entry *eaux,
     for (size_t i = 1; i <= n; i++) {
         if (i == n || nrec_key_cmp(&recs[run], &recs[i]) != 0) {
             if (i - run > 1) {
-                if (liszt_locale_collation_identity())
+                if (liszt_locale_collation_identity()) {
                     bytes_radix_range(es, es->v, eaux, lo + run, lo + i,
                                       0);
-                else
-                    merge_range(es->v, eaux, lo + run, lo + i);
+                } else {
+                    size_t gn = i - run;
+                    const void **ptrs =
+                        liszt_xmalloc((gn + gn / 2) * sizeof *ptrs);
+                    for (size_t g = 0; g < gn; g++)
+                        ptrs[g] = &es->v[lo + run + g];
+                    mpsort(ptrs, gn, entry_ptr_cmp);
+                    for (size_t g = 0; g < gn; g++)
+                        eaux[g] = *(const struct liszt_entry *)ptrs[g];
+                    memcpy(es->v + lo + run, eaux, gn * sizeof *eaux);
+                    free(ptrs);
+                }
             }
             run = i;
         }
@@ -766,7 +906,11 @@ static void
 verify_sorted(struct liszt_entries *es)
 {
     (void)es;
+    S.in_verify = true;
+    S.verify_skipped = false;
     for (size_t i = 1; i < cur_es->len; i++) {
+        if (S.verify_skipped)
+            break;
         if (entry_cmp(&cur_es->v[i - 1], &cur_es->v[i]) > 0) {
             fprintf(stderr,
                     "%s: internal sort verification failed at record %zu\n",
@@ -774,6 +918,7 @@ verify_sorted(struct liszt_entries *es)
             exit(LISZT_STATUS_SERIOUS);
         }
     }
+    S.in_verify = false;
 }
 
 /* --- entry points ------------------------------------------------------ */
@@ -826,11 +971,19 @@ liszt_sort_entries(struct liszt_entries *es)
         memcpy(es->v, aux, es->len * sizeof *aux);
     }
 
+    /* Per-directory engine downgrade: unrepresentable names fall back
+       to the scalar oracle in hard locales. */
+    enum liszt_sort_plan engine = S.engine;
+    if (engine != LISZT_PLAN_SORT_SCALAR && engine != LISZT_PLAN_SORT_NONE
+        && !liszt_locale_collation_identity()
+        && any_invalid_multibyte(es))
+        engine = LISZT_PLAN_SORT_SCALAR;
+
     bool engine_ran = false;
     if (setjmp(S.failed_strcoll) != 0) {
         S.use_strcmp = true;
         memcpy(es->v, snapshot, es->len * sizeof *snapshot);
-        merge_range(es->v, aux, 0, es->len);
+        scalar_mpsort_entries(es, aux);
     } else {
         size_t los[2] = { 0, split };
         size_t his[2] = { split, es->len };
@@ -838,7 +991,7 @@ liszt_sort_entries(struct liszt_entries *es)
         if (!S.group_dirs)
             his[0] = es->len;
 
-        switch (S.engine) {
+        switch (engine) {
         case LISZT_PLAN_SORT_RADIX_BYTES:
             for (int r = 0; r < nranges; r++)
                 bytes_radix_range(es, es->v, aux, los[r], his[r], 0);
@@ -848,7 +1001,7 @@ liszt_sort_entries(struct liszt_entries *es)
             struct xrec *recs = liszt_xmalloc(es->len * sizeof *recs);
             if (!build_transforms(es, recs)) {
                 free(recs);
-                merge_range(es->v, aux, 0, es->len);
+                scalar_mpsort_entries(es, aux);
                 break;
             }
             struct xrec *xaux = liszt_xmalloc(es->len * sizeof *xaux);
@@ -868,7 +1021,7 @@ liszt_sort_entries(struct liszt_entries *es)
             break;
         case LISZT_PLAN_SORT_SCALAR:
         default:
-            merge_range(es->v, aux, 0, es->len);
+            scalar_mpsort_entries(es, aux);
             break;
         }
 
@@ -887,8 +1040,20 @@ liszt_sort_entries(struct liszt_entries *es)
                 S.comparator_calls);
 }
 
+static void (*op_get_item)(const void *, struct liszt_item *);
+
+static int
+op_ptr_cmp(const void *a, const void *b)
+{
+    struct liszt_item ia, ib;
+    op_get_item(a, &ia);
+    op_get_item(b, &ib);
+    return item_cmp(&ia, &ib);
+}
+
 /* Stable, setjmp-protected sort for the small command-line operand
-   array; elements are opaque, the comparator view comes from GET_ITEM. */
+   array; elements are opaque, the comparator view comes from GET_ITEM.
+   mpsort keeps GNU's comparison sequence for operands too. */
 void
 liszt_sort_operands(void *base, size_t n, size_t size,
                     void (*get_item)(const void *, struct liszt_item *))
@@ -897,26 +1062,24 @@ liszt_sort_operands(void *base, size_t n, size_t size,
         return;
     char *v = base;
     char *snapshot = liszt_xmalloc(n * size);
-    char *tmp = liszt_xmalloc(size);
+    char *tmp = liszt_xmalloc(n * size);
     memcpy(snapshot, v, n * size);
+
+    op_get_item = get_item;
+    const void **ptrs = liszt_xmalloc((n + n / 2) * sizeof *ptrs);
 
     if (setjmp(S.failed_strcoll) != 0) {
         S.use_strcmp = true;
         memcpy(v, snapshot, n * size);
     }
-    for (size_t i = 1; i < n; i++) {
-        struct liszt_item a, b;
-        memcpy(tmp, v + i * size, size);
-        size_t j = i;
-        for (; j > 0; j--) {
-            get_item(tmp, &a);
-            get_item(v + (j - 1) * size, &b);
-            if (item_cmp(&a, &b) >= 0)
-                break;
-            memcpy(v + j * size, v + (j - 1) * size, size);
-        }
-        memcpy(v + j * size, tmp, size);
-    }
+    for (size_t i = 0; i < n; i++)
+        ptrs[i] = v + i * size;
+    mpsort(ptrs, n, op_ptr_cmp);
+    for (size_t i = 0; i < n; i++)
+        memcpy(tmp + i * size, ptrs[i], size);
+    memcpy(v, tmp, n * size);
+
+    free(ptrs);
     free(tmp);
     free(snapshot);
 }

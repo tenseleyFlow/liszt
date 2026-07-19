@@ -13,7 +13,8 @@ version_line() {
 
 resolve() {
     case "$1" in
-    */*) [ -x "$1" ] && printf '%s\n' "$1" ;;
+    /*) [ -x "$1" ] && printf '%s\n' "$1" ;;
+    */*) [ -x "$1" ] && printf '%s/%s\n' "$(pwd)" "$1" ;;
     *) command -v "$1" 2>/dev/null ;;
     esac
 }

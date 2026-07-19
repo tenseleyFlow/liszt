@@ -31,12 +31,17 @@ srcabs=$(cd "$src" && pwd)
 mkdir -p "$out"
 outabs=$(cd "$out" && pwd)
 
+jobs=$( (nproc || sysctl -n hw.ncpu || echo 2) 2>/dev/null | head -1 )
 (
     cd "$outabs"
     "$srcabs/configure" --quiet --disable-nls >configure.log 2>&1
-    make -s src/ls >make.log 2>&1
+    # Full make: src/ls alone skips BUILT_SOURCES (configmake.h, gnulib
+    # replacement headers) and fails.
+    make -s -j"$jobs" >make.log 2>&1
 ) || {
-    echo "build-gnu-ls: build failed; see $out/configure.log and $out/make.log" >&2
+    echo "build-gnu-ls: build failed; log tails follow" >&2
+    tail -20 "$out/configure.log" >&2 2>/dev/null
+    tail -30 "$out/make.log" >&2 2>/dev/null
     exit 1
 }
 
