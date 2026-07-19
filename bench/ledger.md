@@ -22,6 +22,11 @@ Extension lanes (v0.2, dev box, 100k flat, 20 runs):
   path); v4 index 141.9ms (prefix decompression in the noise);
   --git-ignore -1 44.8ms. eza -l --git 1.583s -> liszt 11.1x faster.
   Syscalls: +32 constant per repo, +0 per entry (strace-asserted).
+- color=full (100k -l, 10 runs): 71ms vs --color=always 62.5ms
+  (ratio 1.14, gate 1.25; was 1.56 before the perf pass: batched
+  funnel writes, cached gid - 100k getgid syscalls - and memoized
+  styled mode strings). vs eza -l --color: 276.7ms -> 4.4x faster
+  with the full theme on. 2026-07-19.
 - v0.2.0 release lanes, nomad-1 (M5 Pro, APFS): icons color-lane
   ratio 1.042, 10.4x vs eza; --tree 41.0ms vs -R -1 58.8ms (0.696),
   eza -T 522.6ms = 12.7x; -l --git 382.5ms vs -l 342.7ms (1.116),

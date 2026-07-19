@@ -116,6 +116,11 @@ by exact spelling only (no abbreviation).
   `ulimit -n 16` with identical bytes. The full sort/filter/color/icon
   surface applies per sibling list; `-l` works with metadata on the
   left.
+- `--color=full` - eza's whole metadata theme: colored permission
+  bits, link counts, your-user highlighting, magnitude-gradient
+  sizes, dates, inodes, plus eza's filename classes where LS_COLORS
+  is silent. Exact spelling only; stripping the SGR reproduces
+  `--color=always` byte for byte.
 - `--git` - a status column with zero dependencies: liszt parses
   `.git/index` itself (v2-v4, SHA-256 repos, linked worktrees) and
   compares stat data - nothing is hashed, adding a constant ~30

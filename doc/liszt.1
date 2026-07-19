@@ -177,6 +177,22 @@ never hidden. Does not imply
 Suppress an earlier
 .B \-\-git
 (positional, last wins).
+.TP
+.B \-\-color=full
+Everything
+.B \-\-color=always
+does, plus metadata coloring with eza's default theme: permission
+bits (read yellow, write red, execute green, bold for the user
+triplet, purple specials, dark-gray dashes), link counts (highlighted
+for multi-linked regular files), your own user and group in bold
+yellow, sizes on a magnitude gradient (green through purple), dates
+blue, inodes purple, blocks cyan. Filenames that LS_COLORS leaves
+plain fall back to eza's filename classes (source, build files,
+documents, media, archives, temporaries). LS_COLORS always wins where
+it matches, and only SGR sequences are added: stripping them yields
+.B \-\-color=always
+output byte for byte. The word matches by exact spelling only; every
+other value keeps GNU's behavior exactly.
 .SH ENVIRONMENT
 The GNU-compatible variables
 .BR LS_COLORS ,
