@@ -106,6 +106,34 @@ static const struct longopt longopts[] = {
 };
 enum { N_LONGOPTS = sizeof longopts / sizeof longopts[0] };
 
+/* Extension options (v0.2+): eza-compatible names beyond the frozen
+   GNU 9.11 surface. EXACT-MATCH ONLY, consulted before the GNU
+   matcher - abbreviation and ambiguity diagnostics come exclusively
+   from the GNU table, so every GNU-surface parse and error stays
+   byte-identical ("--t" and "--i" listings, "--tre" unrecognized).
+   No abbreviation for extension names, by design. Keys from 512. */
+enum {
+    KEY_EXT_BASE = 512
+};
+
+static const struct longopt ext_longopts[] = {
+    /* Rows land with their sprints (12: icons; 13: tree; 14: git). */
+    {NULL, ARG_NO, 0},
+};
+enum { N_EXT_LONGOPTS = sizeof ext_longopts / sizeof ext_longopts[0] - 1 };
+
+static const struct longopt *
+match_ext_long(const char *text, size_t namelen)
+{
+    for (int i = 0; i < N_EXT_LONGOPTS; i++) {
+        const struct longopt *lo = &ext_longopts[i];
+        if (strlen(lo->name) == namelen
+            && strncmp(lo->name, text, namelen) == 0)
+            return lo;
+    }
+    return NULL;
+}
+
 /* GNU's short-option string "abcdfghiklmnopqrstuvw:xABCDFGHI:LNQRST:UXZ1". */
 static const char short_accept[] = "abcdfghiklmnopqrstuvwxABCDFGHILNQRSTUXZ1";
 static const char short_witharg[] = "wIT";
@@ -702,7 +730,9 @@ parse_long(const char *arg, int argc, char **argv, int *i,
     const char *text = arg + 2;
     const char *eq = strchr(text, '=');
     size_t namelen = eq ? (size_t)(eq - text) : strlen(text);
-    const struct longopt *lo = match_long(text, namelen, arg);
+    const struct longopt *lo = match_ext_long(text, namelen);
+    if (lo == NULL)
+        lo = match_long(text, namelen, arg);
     char display[64];
 
     snprintf(display, sizeof display, "--%s", lo->name);

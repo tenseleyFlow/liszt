@@ -882,6 +882,17 @@ run_case 8 "author with context" C 0 -- -lZa --author "$work/zdir"
 run_case 8 "author short ignored" C 0 -- -1 --author "$work/zdir"
 run_case_pin911 8 "hyperlink missing operand" C 2 -- --hyperlink=always "$work/zz-nope" "$work/zdir/a"
 
+# 11: extension-table invisibility guards. The ext_longopts exact-match
+# layer must never perturb GNU-surface parsing: abbreviation matching,
+# ambiguity listings, and unrecognized-option diagnostics all come from
+# the GNU table alone. These cases pin the mechanism against the oracle.
+run_case 11 "ext guard --t ambiguous" C 2 -- --t
+run_case 11 "ext guard --i ambiguous" C 2 -- --i
+run_case 11 "ext guard --g unique" C 0 -- --g -U1 "$fix/plain"
+run_case 11 "ext guard --tre unrecognized" C 2 -- --tre
+run_case 11 "ext guard --ic unrecognized" C 2 -- --ic
+run_case 11 "ext guard --le unrecognized" C 2 -- --le
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y
