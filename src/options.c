@@ -122,7 +122,8 @@ enum {
     KEY_TREE_GLYPHS,
     KEY_GIT,
     KEY_GIT_IGNORE,
-    KEY_NO_GIT
+    KEY_NO_GIT,
+    KEY_THEME
 };
 
 static const struct longopt ext_longopts[] = {
@@ -134,6 +135,7 @@ static const struct longopt ext_longopts[] = {
     {"git", ARG_NO, KEY_GIT},
     {"git-ignore", ARG_NO, KEY_GIT_IGNORE},
     {"no-git", ARG_NO, KEY_NO_GIT},
+    {"theme", ARG_REQ, KEY_THEME},
     {NULL, ARG_NO, 0},
 };
 enum { N_EXT_LONGOPTS = sizeof ext_longopts / sizeof ext_longopts[0] - 1 };
@@ -212,6 +214,8 @@ struct staging {
     int git_opt;                    /* -1 unset, 0 --no-git, 1 --git */
     bool git_ignore;
     bool color_full;                /* --color=full metadata theme */
+    bool color_explicit;            /* any --color word seen */
+    const char *theme;              /* --theme=NAME */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -405,6 +409,9 @@ print_help(void)
     printf("      --no-git            suppress an earlier --git\n");
     printf("      --color=full        eza-grade metadata coloring (perms,\n");
     printf("                          sizes, users, dates; exact word only)\n");
+    printf("      --theme=NAME        built-in color theme (implies\n");
+    printf("                          --color=full); LISZT_THEME sets the\n");
+    printf("                          default, LISZT_COLORS overrides keys\n");
     exit(LISZT_STATUS_OK);
 }
 
@@ -504,6 +511,9 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_GIT_IGNORE:
         st->git_ignore = true;
+        break;
+    case KEY_THEME:
+        st->theme = value;
         break;
     case KEY_LEVEL:
     case KEY_TREE_LIMIT: {
@@ -642,6 +652,7 @@ handle(int key, const char *value, const char *display, struct staging *st)
            always and adds metadata coloring. Everything else - every
            abbreviation and error - flows to the GNU matcher, whose
            diagnostics never mention the word. */
+        st->color_explicit = true;
         if (value != NULL && strcmp(value, "full") == 0) {
             st->print_with_color = true;
             st->color_full = true;
@@ -940,6 +951,8 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .git_opt = -1,
         .git_ignore = false,
         .color_full = false,
+        .color_explicit = false,
+        .theme = NULL,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -1072,7 +1085,21 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
        --git-ignore filters in any format and does not imply --git. */
     o->show_git = st.git_opt == 1 && o->format == LISZT_FMT_LONG;
     o->git_ignore = st.git_ignore;
-    o->color_full = st.color_full && st.print_with_color;
+    /* --theme implies full coloring unless an explicit --color word
+       decided otherwise; LISZT_THEME supplies the default name. */
+    o->theme_from_flag = st.theme != NULL;
+    o->theme = st.theme;
+    if (o->theme == NULL) {
+        const char *te = getenv("LISZT_THEME");
+        if (te != NULL && *te != '\0')
+            o->theme = te;
+    }
+    if (o->theme != NULL && !st.color_explicit) {
+        st.print_with_color = true;
+        o->print_with_color = true;
+    }
+    o->color_full = (st.color_full || o->theme != NULL)
+        && st.print_with_color;
     o->dired = st.dired && o->format == LISZT_FMT_LONG
         && !o->print_hyperlink && !o->print_icons && !o->tree;
     if (o->eolbyte == 0 && o->dired)

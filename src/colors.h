@@ -64,6 +64,42 @@ enum liszt_cind liszt_file_class(const struct liszt_colorable *c);
 /* get_color_indicator: the escape to paint with, or NULL. */
 const struct liszt_binstr *liszt_color_for(const struct liszt_colorable *c);
 
+/* Theme system (v0.3): the 53-key style surface. Keys follow the
+   EZA_COLORS two-letter vocabulary; the built-in default is the
+   16-color eza theme. liszt_theme_style() is the single accessor -
+   selection and LISZT_COLORS overlays mutate the table at init only. */
+enum liszt_theme_key {
+    LISZT_TK_FI, LISZT_TK_DI, LISZT_TK_LN, LISZT_TK_PI, LISZT_TK_BD,
+    LISZT_TK_CD, LISZT_TK_SO, LISZT_TK_EX, LISZT_TK_OR,
+    LISZT_TK_UR, LISZT_TK_UW, LISZT_TK_UX, LISZT_TK_UE, LISZT_TK_GR,
+    LISZT_TK_GW, LISZT_TK_GX, LISZT_TK_TR, LISZT_TK_TW, LISZT_TK_TX,
+    LISZT_TK_SU, LISZT_TK_SF,
+    LISZT_TK_LC, LISZT_TK_LM, LISZT_TK_UU, LISZT_TK_UN, LISZT_TK_GU,
+    LISZT_TK_GN, LISZT_TK_NB, LISZT_TK_NK, LISZT_TK_NM, LISZT_TK_NG,
+    LISZT_TK_NT, LISZT_TK_DF, LISZT_TK_DS,
+    LISZT_TK_DA, LISZT_TK_IN, LISZT_TK_BL, LISZT_TK_XX,
+    LISZT_TK_GA, LISZT_TK_GM, LISZT_TK_GD, LISZT_TK_GV, LISZT_TK_GT,
+    LISZT_TK_GI, LISZT_TK_GC,
+    LISZT_TK_IM, LISZT_TK_VI, LISZT_TK_MU, LISZT_TK_LO, LISZT_TK_CR,
+    LISZT_TK_DO, LISZT_TK_CO, LISZT_TK_TM, LISZT_TK_CM, LISZT_TK_BU,
+    LISZT_TK_SC,
+    LISZT_TK_N
+};
+
+/* Select a preset ("default" = built-ins). False = unknown name. */
+bool liszt_theme_select(const char *name);
+/* All preset names, for the error listing. */
+const char *const *liszt_theme_names(size_t *n);
+/* Overlay LISZT_COLORS (LS_COLORS grammar over the key vocabulary);
+   unknown keys or parse failure diagnose and drop the variable. */
+void liszt_theme_env_overlay(void);
+/* NULL when the key has no style (uncolored). */
+const struct liszt_binstr *liszt_theme_style(enum liszt_theme_key k);
+/* Replace the LS_COLORS-default filekind styles with the theme's
+   (called by liszt_colors_parse when the scheme was empty). */
+void liszt_theme_apply_filekinds(void);
+bool liszt_theme_active(void);
+
 /* --color=full filename-class fallback (v0.3): eza's filetype chain
    (readme prefix, exact name, lowercased last-dot extension, temp
    patterns) for regular files LS_COLORS left unstyled. NULL = none. */

@@ -282,6 +282,10 @@ liszt_colors_parse(bool *color_enabled)
         const char *colorterm = getenv("COLORTERM");
         if (!(colorterm && *colorterm) && !known_term_type())
             *color_enabled = false;
+        /* No scheme: a selected theme's filekind styles become the
+           filename colors (explicit LS_COLORS always wins). */
+        if (*color_enabled && liszt_theme_active())
+            liszt_theme_apply_filekinds();
         return;
     }
 
@@ -535,17 +539,212 @@ liszt_color_for(const struct liszt_colorable *c)
     return s->string ? s : NULL;
 }
 
+/* --- theme system (v0.3) ----------------------------------------------- */
+
+#include "themes_tab.h"
+
+/* The 53-key style table. Defaults are the built-in 16-color eza
+   theme (what --color=full ships without --theme); preset selection
+   and LISZT_COLORS overlay non-NULL entries. Values point either at
+   static literals or into the overlay arena. */
+static struct liszt_binstr theme_styles[LISZT_TK_N] = {
+    /* fi */ { 0, NULL },       /* di */ { 0, NULL },
+    /* ln */ { 0, NULL },       /* pi */ { 0, NULL },
+    /* bd */ { 0, NULL },       /* cd */ { 0, NULL },
+    /* so */ { 0, NULL },       /* ex */ { 0, NULL },
+    /* or */ { 0, NULL },
+    /* ur */ { 4, "1;33" },     /* uw */ { 4, "1;31" },
+    /* ux */ { 6, "1;4;32" },   /* ue */ { 4, "1;32" },
+    /* gr */ { 2, "33" },       /* gw */ { 2, "31" },
+    /* gx */ { 2, "32" },       /* tr */ { 2, "33" },
+    /* tw */ { 2, "31" },       /* tx */ { 2, "32" },
+    /* su */ { 2, "35" },       /* sf */ { 2, "35" },
+    /* lc */ { 4, "1;31" },     /* lm */ { 5, "31;43" },
+    /* uu */ { 4, "1;33" },     /* un */ { 0, NULL },
+    /* gu */ { 4, "1;33" },     /* gn */ { 0, NULL },
+    /* nb */ { 2, "32" },       /* nk */ { 4, "1;32" },
+    /* nm */ { 2, "33" },       /* ng */ { 2, "31" },
+    /* nt */ { 2, "35" },       /* df */ { 4, "1;32" },
+    /* ds */ { 2, "32" },
+    /* da */ { 2, "34" },       /* in */ { 2, "35" },
+    /* bl */ { 2, "36" },       /* xx */ { 4, "1;90" },
+    /* ga */ { 2, "32" },       /* gm */ { 2, "34" },
+    /* gd */ { 2, "31" },       /* gv */ { 2, "33" },
+    /* gt */ { 2, "35" },       /* gi */ { 1, "2" },
+    /* gc */ { 2, "31" },
+    /* im */ { 2, "35" },       /* vi */ { 4, "1;35" },
+    /* mu */ { 2, "36" },       /* lo */ { 4, "1;36" },
+    /* cr */ { 4, "1;32" },     /* do */ { 2, "32" },
+    /* co */ { 2, "31" },       /* tm */ { 1, "2" },
+    /* cm */ { 2, "33" },       /* bu */ { 6, "1;4;33" },
+    /* sc */ { 4, "1;33" },
+};
+
+/* Map generator key order (LTHEME_K_*) onto the enum: both emit the
+   same fixed list, verified by the static assert below. */
+_Static_assert((int)LTHEME_N_KEYS == (int)LISZT_TK_N,
+               "themes_tab key order out of sync");
+
+static bool theme_on;
+static char *theme_ov_arena;
+
+bool
+liszt_theme_active(void)
+{
+    return theme_on;
+}
+
+const struct liszt_binstr *
+liszt_theme_style(enum liszt_theme_key k)
+{
+    return theme_styles[k].len ? &theme_styles[k] : NULL;
+}
+
+const char *const *
+liszt_theme_names(size_t *n)
+{
+    *n = LTHEME_N_THEMES;
+    return ltheme_names;
+}
+
+bool
+liszt_theme_select(const char *name)
+{
+    if (strcmp(name, "default") == 0) {
+        theme_on = true;
+        return true;
+    }
+    for (size_t t = 0; t < LTHEME_N_THEMES; t++) {
+        if (strcmp(ltheme_names[t], name) != 0)
+            continue;
+        for (size_t k = 0; k < LTHEME_N_KEYS; k++)
+            if (ltheme_styles[t][k] != NULL) {
+                theme_styles[k].string = ltheme_styles[t][k];
+                theme_styles[k].len = strlen(ltheme_styles[t][k]);
+            }
+        theme_on = true;
+        return true;
+    }
+    return false;
+}
+
+/* LISZT_COLORS: colon-separated key=SGR in the LS_COLORS grammar over
+   the two-letter vocabulary. Any unknown key or bad value drops the
+   whole variable with a diagnostic, keeping the theme (the LS_ICONS
+   soft-fail rule). */
+static const char theme_key_names[LISZT_TK_N][2] = {
+    {'f','i'},{'d','i'},{'l','n'},{'p','i'},{'b','d'},{'c','d'},
+    {'s','o'},{'e','x'},{'o','r'},
+    {'u','r'},{'u','w'},{'u','x'},{'u','e'},{'g','r'},{'g','w'},
+    {'g','x'},{'t','r'},{'t','w'},{'t','x'},{'s','u'},{'s','f'},
+    {'l','c'},{'l','m'},{'u','u'},{'u','n'},{'g','u'},{'g','n'},
+    {'n','b'},{'n','k'},{'n','m'},{'n','g'},{'n','t'},{'d','f'},
+    {'d','s'},
+    {'d','a'},{'i','n'},{'b','l'},{'x','x'},
+    {'g','a'},{'g','m'},{'g','d'},{'g','v'},{'g','t'},{'g','i'},
+    {'g','c'},
+    {'i','m'},{'v','i'},{'m','u'},{'l','o'},{'c','r'},{'d','o'},
+    {'c','o'},{'t','m'},{'c','m'},{'b','u'},{'s','c'},
+};
+
+void
+liszt_theme_env_overlay(void)
+{
+    const char *env = getenv("LISZT_COLORS");
+    if (env == NULL || *env == '\0')
+        return;
+    char *arena = liszt_xmalloc(strlen(env) + 1);
+    char *q = arena;
+    const char *p = env;
+    struct liszt_binstr pending[LISZT_TK_N] = { 0 };
+    bool touched[LISZT_TK_N] = { false };
+    bool fail = false;
+
+    while (*p != '\0') {
+        while (*p == ':')
+            p++;
+        if (*p == '\0')
+            break;
+        if (p[0] == '\0' || p[1] == '\0' || p[2] != '=') {
+            fail = true;
+            break;
+        }
+        int ki = -1;
+        for (int i = 0; i < LISZT_TK_N; i++)
+            if (theme_key_names[i][0] == p[0]
+                && theme_key_names[i][1] == p[1]) {
+                ki = i;
+                break;
+            }
+        if (ki < 0) {
+            fail = true;
+            break;
+        }
+        p += 3;
+        char *vstart = q;
+        size_t vlen = 0;
+        if (!liszt_funky_decode(&q, &p, false, &vlen) || vlen == 0) {
+            fail = true;
+            break;
+        }
+        for (size_t i = 0; i < vlen; i++)
+            if (!((vstart[i] >= '0' && vstart[i] <= '9')
+                  || vstart[i] == ';')) {
+                fail = true;
+                break;
+            }
+        if (fail)
+            break;
+        pending[ki].string = vstart;
+        pending[ki].len = vlen;
+        touched[ki] = true;
+    }
+    if (fail) {
+        liszt_error(0,
+                    "unparsable value for LISZT_COLORS environment"
+                    " variable");
+        free(arena);
+        return;
+    }
+    theme_ov_arena = arena;
+    for (int i = 0; i < LISZT_TK_N; i++)
+        if (touched[i])
+            theme_styles[i] = pending[i];
+    /* Filekind keys also override the LS_COLORS scheme (LISZT_COLORS
+       outranks it, mirroring EZA_COLORS). */
+    static const enum liszt_cind kind_map[9] = {
+        LISZT_C_FILE, LISZT_C_DIR, LISZT_C_LINK, LISZT_C_FIFO,
+        LISZT_C_BLK, LISZT_C_CHR, LISZT_C_SOCK, LISZT_C_EXEC,
+        LISZT_C_ORPHAN
+    };
+    for (int i = LISZT_TK_FI; i <= LISZT_TK_OR; i++)
+        if (touched[i])
+            color_indicator[kind_map[i - LISZT_TK_FI]] =
+                theme_styles[i];
+}
+
+void
+liszt_theme_apply_filekinds(void)
+{
+    static const enum liszt_cind kind_map[9] = {
+        LISZT_C_FILE, LISZT_C_DIR, LISZT_C_LINK, LISZT_C_FIFO,
+        LISZT_C_BLK, LISZT_C_CHR, LISZT_C_SOCK, LISZT_C_EXEC,
+        LISZT_C_ORPHAN
+    };
+    for (int i = LISZT_TK_FI; i <= LISZT_TK_OR; i++)
+        if (theme_styles[i].len)
+            color_indicator[kind_map[i - LISZT_TK_FI]] =
+                theme_styles[i];
+}
+
 /* --- --color=full filename classes (v0.3) ------------------------------ */
 
 #include "colorclass_tab.h"
 
 /* Class order matches gen-colorclass-tab.sh: Image Video Music
-   Lossless Crypto Document Compressed Temp Compiled Build Source. */
-static const struct liszt_binstr lcc_styles[11] = {
-    { 2, "35" }, { 4, "1;35" }, { 2, "36" }, { 4, "1;36" },
-    { 4, "1;32" }, { 2, "32" }, { 2, "31" }, { 1, "2" },
-    { 2, "33" }, { 6, "1;4;33" }, { 4, "1;33" },
-};
+   Lossless Crypto Document Compressed Temp Compiled Build Source -
+   contiguous in the theme table from IM. */
+#define lcc_style(cls) liszt_theme_style((enum liszt_theme_key)(LISZT_TK_IM + (cls)))
 
 static unsigned char
 lcc_fold(unsigned char b)
@@ -560,14 +759,14 @@ liszt_colorclass_for(const char *name, size_t len)
         return NULL;
     /* Case-insensitive readme prefix wins (eza's compatibility rule). */
     if (len >= 6 && liszt_strncasecmp_c(name, "readme", 6) == 0)
-        return &lcc_styles[9];
+        return lcc_style(9);
     unsigned char last = lcc_fold((unsigned char)name[len - 1]);
     for (uint16_t i = lcc_name_bucket[last];
          i < lcc_name_bucket[last + 1]; i++) {
         const struct lcc_ent *e = &lcc_name_tab[i];
         if (e->key_len == len
             && memcmp(lcc_name_pool + e->key_off, name, len) == 0)
-            return &lcc_styles[e->class];
+            return lcc_style(e->class);
     }
     /* memrchr is a GNU extension (absent on Darwin): scan back. */
     const char *dot = NULL;
@@ -585,12 +784,12 @@ liszt_colorclass_for(const char *name, size_t len)
             if (e->key_len == elen
                 && liszt_strncasecmp_c(ext, lcc_ext_pool + e->key_off,
                                        elen) == 0)
-                return &lcc_styles[e->class];
+                return lcc_style(e->class);
         }
     }
     if (name[len - 1] == '~'
         || (name[0] == '#' && name[len - 1] == '#' && len > 1))
-        return &lcc_styles[7];
+        return lcc_style(7);
     return NULL;
 }
 

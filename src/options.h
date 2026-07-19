@@ -91,6 +91,8 @@ struct liszt_options {
     bool show_git;              /* --git column (long only, v0.2) */
     bool git_ignore;            /* hide ignored entries (v0.2) */
     bool color_full;            /* --color=full metadata theme (v0.3) */
+    const char *theme;          /* preset name or NULL (v0.3) */
+    bool theme_from_flag;       /* flag = hard error; env = soft */
     enum liszt_indicator_style indicator_style;
     bool qmark_funny_chars;
     bool align_variable_outer_quotes;
