@@ -12,6 +12,9 @@
 #ifdef __linux__
 #include <sys/sysmacros.h>
 #endif
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
 #include "colors.h"
 #include "config.h"
@@ -1092,10 +1095,31 @@ fill_meta(const char *dirname, const struct liszt_options *o,
                 par_min = 1;
         }
         if (es->len >= (size_t)par_min) {
+            static long wcap = -1;
+            if (wcap < 0) {
+                const char *wc = getenv("LISZT_PARALLEL_WORKERS");
+                wcap = wc ? atol(wc) : 0;   /* 0 = no override */
+            }
             long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+#ifdef __APPLE__
+            /* APFS metadata calls serialize past the performance
+               cores: the nomad-1 sweep bottomed at P-core count (6),
+               with E-cores adding contention (210ms at 6 workers vs
+               286ms uncapped, gls 239ms). Cap at perflevel0. */
+            {
+                int pcores = 0;
+                size_t plen = sizeof pcores;
+                if (sysctlbyname("hw.perflevel0.logicalcpu", &pcores,
+                                 &plen, NULL, 0) == 0 && pcores > 0
+                    && (long)pcores < ncpu)
+                    ncpu = pcores;
+            }
+#endif
             size_t workers = es->len / 256 + 1;
             if (ncpu > 0 && workers > (size_t)ncpu)
                 workers = (size_t)ncpu;
+            if (wcap > 0 && workers > (size_t)wcap)
+                workers = (size_t)wcap;
             if (workers > 1) {
                 struct meta_par_ctx ctx = { dirname, o, es, group };
                 liszt_run_tasks(meta_par_task, &ctx, es->len, workers);

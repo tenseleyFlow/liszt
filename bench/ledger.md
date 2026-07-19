@@ -9,11 +9,21 @@ permanent entry with rationale. Matrix source: bench/run-matrix.sh.
 | (empty) | | |
 
 Closed entries:
+- macOS -l 100k: was 286ms uncapped-pool vs gls 239ms (E-core
+  contention on APFS metadata locks); 208ms (1.14x win) after capping
+  Darwin workers at hw.perflevel0 P-cores. 2026-07-19.
+- macOS dired -l: same cause; 232ms vs gls 274ms after the cap.
 - flat -S 100k: was 75.9ms vs GNU 74.3ms serial; 38.6ms (1.93x win)
   after 09D parallel stat. 2026-07-19.
 - flat -t 100k: same shape; cleared by the same change.
 
 Notes:
+- Darwin worker sweep (nomad-1, -l 100k): 2->323, 3->262, 4->226,
+  6->210, 8->271, 10->274, uncapped(12+)->286ms. Minimum sits exactly
+  at P-core count; E-cores actively hurt APFS metadata concurrency.
+- LTO probe: <1% on every lane (mat's 11% came from cross-TU inlining
+  liszt does not need); not kept. Cold-cache -l on the dev box:
+  53ms vs GNU 146ms.
 - The -S/-t gap was per-call statx time in a serial loop (identical
   syscall counts and masks); the pool cleared it. Threshold: parallel
   engages at 400 entries (dev-box crossover 200-400, aspen worker
