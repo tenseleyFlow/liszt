@@ -31,8 +31,9 @@ check_status() {
 [ -x ./lz ] || { echo "tests/unit: ./lz missing; run make first" >&2; exit 1; }
 
 # Version and help exit 0 and carry the canonical name from either binary.
-check_eq "liszt --version line" "liszt 0.0.1" "$(./liszt --version)"
-check_eq "lz --version line" "liszt 0.0.1" "$(./lz --version)"
+conf_ver=$(sed -n 's/^LISZT_VERSION="\(.*\)"/\1/p' configure)
+check_eq "liszt --version line" "liszt $conf_ver" "$(./liszt --version)"
+check_eq "lz --version line" "liszt $conf_ver" "$(./lz --version)"
 check_status "liszt --version exit" 0 ./liszt --version
 check_status "liszt --help exit" 0 ./liszt --help
 check_status "lz --help exit" 0 ./lz --help

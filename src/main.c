@@ -405,9 +405,12 @@ emit_name_colored(const struct litem *it, bool symlink_target,
     }
     if (used_this) {
         liszt_color_prep_non_filename();
+        /* GNU's wrap check uses quote_name's return, which includes
+           the alignment pad byte (fuzz-pinned, seed 1337). */
+        size_t wlen = blen + (padded ? 1u : 0u);
         if (cur_opts->line_length
             && (start_col / cur_opts->line_length
-                != (start_col + blen - 1) / cur_opts->line_length))
+                != (start_col + wlen - 1) / cur_opts->line_length))
             liszt_color_put_ind(LISZT_C_CLR_TO_EOL);
     }
     return blen;

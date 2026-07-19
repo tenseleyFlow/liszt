@@ -825,6 +825,10 @@ run_case 8 "dired utf8" "$U8" 0 -- -Db "$work/zdir"
 run_case_pin911 8 "dired zero fatal" C 2 -- -D --zero "$work/zdir"
 run_case_pin911 8 "zero dired fatal" C 2 -- --zero -D "$work/zdir"
 run_case_color "$DEFCOLORS" 8 "dired color uncounted" C 0 -- -D --color=always "$work/zdir"
+# Wrap-check length includes the alignment pad byte (fuzz seed 1337):
+# narrow width + shell quoting + color puts padded names on the CLR
+# boundary.
+run_case_color "$DEFCOLORS" 8 "clr wrap counts pad" C 0 -- -la --quoting-style=shell --color=always -w 4 "$work/zdir"
 
 # 08C: --hyperlink, 9.11-pinned: the OSC 8 terminator changed from BEL
 # to ST between vintages (FreeBSD ports ships 9.9). Both tools run on
