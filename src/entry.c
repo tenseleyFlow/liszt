@@ -23,7 +23,18 @@ liszt_entries_free(struct liszt_entries *es)
 {
     free(es->arena);
     free(es->v);
+    free(es->meta);
     memset(es, 0, sizeof *es);
+}
+
+void
+liszt_entries_ensure_meta(struct liszt_entries *es)
+{
+    if (es->meta_cap < es->len) {
+        es->meta = liszt_xrealloc(es->meta, es->len * sizeof *es->meta);
+        es->meta_cap = es->len;
+    }
+    memset(es->meta, 0, es->len * sizeof *es->meta);
 }
 
 void
@@ -49,10 +60,12 @@ liszt_entries_add(struct liszt_entries *es, const char *name, size_t len,
         es->cap = cap;
     }
 
-    struct liszt_entry *e = &es->v[es->len++];
+    struct liszt_entry *e = &es->v[es->len];
     e->name_off = (uint32_t)es->arena_len;
     e->name_len = (uint32_t)len;
+    e->meta_idx = (uint32_t)es->len;
     e->ftype = (uint8_t)type;
+    es->len++;
     memcpy(es->arena + es->arena_len, name, len);
     es->arena[es->arena_len + len] = '\0';
     es->arena_len += len + 1;

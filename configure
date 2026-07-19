@@ -87,6 +87,20 @@ long probe(void);
 long probe(void) { return extattr_get_file(".", EXTATTR_NAMESPACE_USER, "x", (void *)0, 0); }
 ' && have_extattr=1
 
+have_st_mtim=0
+try_compile st_mtim '
+#include <sys/stat.h>
+long probe(void);
+long probe(void) { struct stat st = {0}; return (long)st.st_mtim.tv_nsec; }
+' && have_st_mtim=1
+
+have_st_mtimespec=0
+try_compile st_mtimespec '
+#include <sys/stat.h>
+long probe(void);
+long probe(void) { struct stat st = {0}; return (long)st.st_mtimespec.tv_nsec; }
+' && have_st_mtimespec=1
+
 case "$(uname -m)" in
 x86_64|amd64|aarch64|arm64) endian=little ;;
 *) endian=unknown ;;
@@ -103,6 +117,8 @@ cat > config.h <<EOF
 #define LISZT_HAVE_GETXATTR $have_getxattr
 #define LISZT_HAVE_GETXATTR_DARWIN $have_getxattr_darwin
 #define LISZT_HAVE_EXTATTR $have_extattr
+#define LISZT_HAVE_ST_MTIM $have_st_mtim
+#define LISZT_HAVE_ST_MTIMESPEC $have_st_mtimespec
 #define LISZT_ENDIAN_$endian 1
 #endif
 EOF
@@ -118,3 +134,4 @@ echo "liszt $LISZT_VERSION configured:"
 echo "  cc=$cc"
 echo "  statx=$have_statx getdents64=$have_getdents64 getdirentries=$have_getdirentries d_type=$have_d_type"
 echo "  getxattr=$have_getxattr getxattr_darwin=$have_getxattr_darwin extattr=$have_extattr endian=$endian"
+echo "  st_mtim=$have_st_mtim st_mtimespec=$have_st_mtimespec"
