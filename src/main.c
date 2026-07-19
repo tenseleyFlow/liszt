@@ -1309,6 +1309,8 @@ main(int argc, char **argv)
     }
     free(ops);
     free(o.operands);
+    free(o.hide_patterns);
+    free(o.ignore_patterns);
 
     if (o.print_with_color && liszt_color_used()
         && !liszt_color_restore_is_noop())
