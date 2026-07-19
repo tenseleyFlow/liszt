@@ -43,6 +43,16 @@ for loc in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
         break
     fi
 done
+# Dictionary-collation locale for the hard-locale sort legs (C.UTF-8 is
+# byte-order; en_US exercises real collation tables).
+dict_locale=""
+for loc in en_US.UTF-8 en_US.utf8; do
+    if locale -a 2>/dev/null | grep -qix "$loc"; then
+        dict_locale="$loc"
+        break
+    fi
+done
+
 if [ -z "$utf8_locale" ] && [ "${LISZT_ALLOW_NO_UTF8:-0}" != "1" ]; then
     echo "tests/golden: no UTF-8 locale available; refusing (set LISZT_ALLOW_NO_UTF8=1 to override)" >&2
     exit 1
@@ -72,7 +82,8 @@ normprog() {
 run_pinned() {
     lc="$1"
     shift
-    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= "$@"
+    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
+        LISZT_DEBUG_VERIFY=1 "$@"
 }
 
 # --- Phase 1: oracle self-test -------------------------------------------
@@ -217,6 +228,40 @@ run_case 1 "dangling symlink operand" C 0 -- -U1 "$fix/links/dangling"
 run_case 1 "dashdash" C 0 -- -U1 -- "$fix/plain"
 run_case 1 "permuted options" C 0 -- "$fix/plain" -U1
 run_case 1 "format word equals -1" C 0 -- -U --format=single-column "$fix/plain"
+
+# 02: sorted listings across the locale matrix; engines oracle-checked
+# by the harness environment below (LISZT_DEBUG_VERIFY exported).
+D8="${dict_locale:-C}"
+run_case 2 "sorted plain" C 0 -- -1 "$fix/plain"
+run_case 2 "sorted plain utf8" "$U8" 0 -- -1 "$fix/plain"
+run_case 2 "sorted plain dict" "$D8" 0 -- -1 "$fix/plain"
+run_case 2 "sorted shapes -a" C 0 -- -1a "$fix/shapes"
+run_case 2 "sorted shapes -a utf8" "$U8" 0 -- -1a "$fix/shapes"
+run_case 2 "sorted shapes -a dict" "$D8" 0 -- -1a "$fix/shapes"
+run_case 2 "sorted reverse dict" "$D8" 0 -- -1r "$fix/shapes"
+run_case 2 "sorted links -a" C 0 -- -1a "$fix/links"
+run_case 2 "-f is -aU" C 0 -- -f1 "$fix/plain"
+run_case 2 "-f last-wins with sort word" C 0 -- -f1 --sort=name "$fix/plain"
+run_case 2 "version sort" C 0 -- -1v "$fix/versions"
+run_case 2 "version sort -a" C 0 -- -1va "$fix/versions"
+run_case 2 "version reverse" C 0 -- -1vr "$fix/versions"
+run_case 2 "extension sort" C 0 -- -1X "$fix/plain"
+run_case 2 "extension sort dict" "$D8" 0 -- -1X "$fix/versions"
+run_case 2 "size sort" C 0 -- -1S "$fix/sizes"
+run_case 2 "size sort links -a" C 0 -- -1Sa "$fix/links"
+run_case 2 "size reverse" C 0 -- -1Sr "$fix/sizes"
+run_case 2 "time sort" C 0 -- -1t "$fix/times"
+run_case 2 "time reverse" C 0 -- -1tr "$fix/times"
+run_case 2 "time sort dict" "$D8" 0 -- -1t "$fix/times"
+run_case 2 "group dirs first" C 0 -- -1a --group-directories-first "$fix/links"
+run_case 2 "group dirs -r" C 0 -- -1ar --group-directories-first "$fix/links"
+run_case 2 "group with -U disabled" C 0 -- -1aU --group-directories-first "$fix/links"
+run_case 2 "group with -S" C 0 -- -1aS --group-directories-first "$fix/links"
+run_case 2 "sorted operands mix" C 2 -- -1 "$fix/times/recent-a" "$work/nope" "$fix/plain" "$fix/times/old-a"
+run_case 2 "size-sorted operands" C 0 -- -1S "$fix/sizes/sz512" "$fix/sizes/sz1" "$fix/sizes/sz65536"
+run_case 2 "sort word invalid" C 1 -- --sort=bogus
+run_case 2 "sort word ambiguous" C 1 -- --sort=n
+run_case 2 "sorted two dirs" C 0 -- -1 "$fix/links" "$fix/plain"
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus

@@ -76,6 +76,16 @@ row_names="$row_names oracle_u1_C liszt_u1_C"
 set -- "$@" \
     "env LC_ALL=C $oracle -U -1 $fixture" \
     "env LC_ALL=C ./liszt -U -1 $fixture"
+# Sorted lanes (sprint 02).
+row_names="$row_names liszt_default_C liszt_S_C liszt_t_C"
+set -- "$@" \
+    "env LC_ALL=C ./liszt $fixture" \
+    "env LC_ALL=C ./liszt -S $fixture" \
+    "env LC_ALL=C ./liszt -t $fixture"
+if [ -n "$utf8_locale" ]; then
+    row_names="$row_names liszt_default_utf8"
+    set -- "$@" "env LC_ALL=$utf8_locale ./liszt $fixture"
+fi
 row_names="$row_names liszt_startup"
 set -- "$@" "./liszt --version"
 

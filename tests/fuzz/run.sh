@@ -26,7 +26,7 @@ oracle=$(sh scripts/find-gnu-ls.sh) || {
 }
 
 utf8_locale=""
-for loc in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+for loc in en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
     if locale -a 2>/dev/null | grep -qix "$loc"; then
         utf8_locale="$loc"
         break
@@ -93,8 +93,19 @@ gen_plan() {
         if (rand() < 0.4) print "L goodlink subdir"
         if (rand() < 0.3) print "L deadlink zz-nothing"
 
-        # Flags: -U always (no sorting until sprint 02).
-        flags = "-U"
+        # Sort surface (sprint 02): every implemented word plus -r,
+        # -f, and grouping.
+        p = rand()
+        if (p < 0.25) flags = "-U"
+        else if (p < 0.35) flags = "-t"
+        else if (p < 0.45) flags = "-S"
+        else if (p < 0.55) flags = "-v"
+        else if (p < 0.62) flags = "-X"
+        else if (p < 0.68) flags = "-f"
+        else if (p < 0.74) flags = "--sort=version"
+        else flags = ""             # default name sort
+        if (rand() < 0.3) flags = flags " -r"
+        if (rand() < 0.25) flags = flags " --group-directories-first"
         p = rand()
         if (p < 0.4) flags = flags " -1"
         else if (p < 0.6) flags = flags " --format=single-column"
@@ -102,6 +113,7 @@ gen_plan() {
         p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
+        sub(/^ /, "", flags)
 
         # Operands.
         ops = "TREE"
@@ -165,6 +177,9 @@ EOF
         --) set -- "$@" -- ;;
         esac
     done
+    if [ -z "$flags" ]; then
+        : # default sort, no flag words
+    fi
     if [ "$style" = "permuted" ]; then
         args_ops="$*"
         set -- $args_ops $flags
@@ -173,6 +188,7 @@ EOF
     fi
 
     env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
+        LISZT_DEBUG_VERIFY=1 \
         "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
     urc=$?
     env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
