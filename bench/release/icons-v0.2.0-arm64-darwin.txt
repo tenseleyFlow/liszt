@@ -1,0 +1,34 @@
+kind=icons
+host=nomad
+os=Darwin 25.4.0 arm64
+liszt_version=liszt 0.1.0
+fixture=/tmp/liszt-perf-100k entries=100000
+
+Benchmark 1: env LC_ALL=C LS_COLORS='' ./liszt --color=always -1 /tmp/liszt-perf-100k
+  Time (mean ± σ):      34.7 ms ±   0.8 ms    [User: 6.6 ms, System: 27.0 ms]
+  Range (min … max):    33.9 ms …  36.8 ms    10 runs
+ 
+Benchmark 2: env LC_ALL=C LS_COLORS='' ./liszt --color=always --icons=always -1 /tmp/liszt-perf-100k
+  Time (mean ± σ):      36.2 ms ±   0.2 ms    [User: 8.3 ms, System: 26.9 ms]
+  Range (min … max):    35.7 ms …  36.7 ms    10 runs
+ 
+Benchmark 3: env LC_ALL=C ./liszt -1 /tmp/liszt-perf-100k
+  Time (mean ± σ):      34.6 ms ±   0.5 ms    [User: 6.6 ms, System: 27.0 ms]
+  Range (min … max):    34.1 ms …  35.9 ms    10 runs
+ 
+Benchmark 4: env LC_ALL=C ./liszt --icons=always -1 /tmp/liszt-perf-100k
+  Time (mean ± σ):      36.2 ms ±   0.3 ms    [User: 8.3 ms, System: 27.0 ms]
+  Range (min … max):    35.9 ms …  36.7 ms    10 runs
+ 
+Benchmark 5: env LC_ALL=C eza --color=always --icons=always -1 /tmp/liszt-perf-100k
+  Time (mean ± σ):     377.3 ms ±   3.2 ms    [User: 172.2 ms, System: 202.2 ms]
+  Range (min … max):   373.0 ms … 381.7 ms    10 runs
+ 
+Summary
+  env LC_ALL=C ./liszt -1 /tmp/liszt-perf-100k ran
+    1.00 ± 0.03 times faster than env LC_ALL=C LS_COLORS='' ./liszt --color=always -1 /tmp/liszt-perf-100k
+    1.05 ± 0.02 times faster than env LC_ALL=C LS_COLORS='' ./liszt --color=always --icons=always -1 /tmp/liszt-perf-100k
+    1.05 ± 0.02 times faster than env LC_ALL=C ./liszt --icons=always -1 /tmp/liszt-perf-100k
+   10.90 ± 0.18 times faster than env LC_ALL=C eza --color=always --icons=always -1 /tmp/liszt-perf-100k
+icons_gate=PASS (color-lane ratio 1.042 <= 1.10)
+icons_vs_eza=10.4x

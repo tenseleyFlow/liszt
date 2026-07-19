@@ -1,0 +1,36 @@
+kind=git
+host=nomad
+os=Darwin 25.4.0 arm64
+liszt_version=liszt 0.1.0
+fixture=build/bench/git-200k entries=200000
+
+git_syscalls=SKIP (no strace)
+Benchmark 1: env LC_ALL=C ./liszt -l build/bench/git-200k
+  Time (mean ± σ):     342.7 ms ±  12.8 ms    [User: 127.5 ms, System: 1283.1 ms]
+  Range (min … max):   332.6 ms … 376.8 ms    10 runs
+ 
+Benchmark 2: env LC_ALL=C ./liszt -l --git build/bench/git-200k
+  Time (mean ± σ):     382.5 ms ±  42.2 ms    [User: 214.7 ms, System: 1329.9 ms]
+  Range (min … max):   355.6 ms … 464.2 ms    10 runs
+ 
+  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet system without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+ 
+Benchmark 3: env LC_ALL=C ./liszt -l --git build/bench/git-200k-v4
+  Time (mean ± σ):     352.2 ms ±   8.6 ms    [User: 207.1 ms, System: 1235.7 ms]
+  Range (min … max):   345.2 ms … 373.5 ms    10 runs
+ 
+Benchmark 4: env LC_ALL=C ./liszt --git-ignore -1 build/bench/git-200k
+  Time (mean ± σ):      92.9 ms ±   1.3 ms    [User: 30.0 ms, System: 61.4 ms]
+  Range (min … max):    91.0 ms …  94.6 ms    10 runs
+ 
+Benchmark 5: env LC_ALL=C eza -l --git build/bench/git-200k
+  Time (mean ± σ):      5.729 s ±  0.048 s    [User: 1.724 s, System: 9.507 s]
+  Range (min … max):    5.669 s …  5.811 s    10 runs
+ 
+Summary
+  env LC_ALL=C ./liszt --git-ignore -1 build/bench/git-200k ran
+    3.69 ± 0.15 times faster than env LC_ALL=C ./liszt -l build/bench/git-200k
+    3.79 ± 0.11 times faster than env LC_ALL=C ./liszt -l --git build/bench/git-200k-v4
+    4.12 ± 0.46 times faster than env LC_ALL=C ./liszt -l --git build/bench/git-200k
+   61.68 ± 0.99 times faster than env LC_ALL=C eza -l --git build/bench/git-200k
+git_gate=PASS (git/plain ratio 1.116 <= 2.0)

@@ -22,6 +22,11 @@ Extension lanes (v0.2, dev box, 100k flat, 20 runs):
   path); v4 index 141.9ms (prefix decompression in the noise);
   --git-ignore -1 44.8ms. eza -l --git 1.583s -> liszt 11.1x faster.
   Syscalls: +32 constant per repo, +0 per entry (strace-asserted).
+- v0.2.0 release lanes, nomad-1 (M5 Pro, APFS): icons color-lane
+  ratio 1.042, 10.4x vs eza; --tree 41.0ms vs -R -1 58.8ms (0.696),
+  eza -T 522.6ms = 12.7x; -l --git 382.5ms vs -l 342.7ms (1.116),
+  eza -l --git 5.729s = 15.0x; v4 index 352.2ms. Full GNU matrix all
+  ten lanes >= 1.02x. Artifacts: bench/release/*-v0.2.0-*.
 
 Closed entries:
 - macOS -l 100k: was 286ms uncapped-pool vs gls 239ms (E-core

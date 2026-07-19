@@ -36,16 +36,16 @@ bars and machine metadata are stored under `bench/release/`.
 
 | workload | vs ls 9.11 (x86-64) | vs ls 9.11 (arm64) |
 |---|---|---|
-| 100k flat, `LC_ALL=C` | 1.7x | 1.8x |
+| 100k flat, `LC_ALL=C` | 1.7x | 1.5x |
 | 100k flat, UTF-8 locale | 1.3x | 2.0x |
-| 100k `-l` | 2.8x | 1.1x |
-| 100k `--color=always -F` | 3.3x | 1.9x |
-| deep tree `-R` | 1.3x | 1.1x |
-| 100k `-S` | 2.0x | 1.9x |
-| 100k `-t` | 1.9x | 1.8x |
+| 100k `-l` | 2.7x | 1.1x |
+| 100k `--color=always -F` | 3.2x | 2.0x |
+| deep tree `-R` | 1.2x | 1.0x |
+| 100k `-S` | 1.9x | 1.6x |
+| 100k `-t` | 1.8x | 1.9x |
 | 100k `-U` | 1.3x | 1.2x |
-| 50-entry dir (startup) | 1.1x | 1.1x |
-| 100k `--dired -l` | 2.6x | 1.1x |
+| 50-entry dir (startup) | 1.0x | 1.0x |
+| 100k `--dired -l` | 2.6x | 1.2x |
 
 ## Install
 
@@ -100,10 +100,42 @@ filesystem has none.
 
 ## Extensions
 
-An extensions era is in progress (v0.2): Nerd-Font icons, `--tree`,
-and a dependency-free `--git` status column, all off by default -
-plain liszt remains byte-identical to GNU ls. Extension flags use
-eza-compatible names and match by exact spelling only.
+v0.2 adds the modern-replacement surface, all off by default: with no
+extension flag, output stays byte-identical to GNU ls and the whole
+parity matrix runs unchanged. Flags use eza-compatible names and match
+by exact spelling only (no abbreviation).
+
+- `--icons[=WHEN]` - Nerd-Font icons from compiled-in tables (933
+  curated mappings), resolved from the name and dirent type alone: no
+  stat, no directory reads. `LS_ICONS` overrides per suffix, filename,
+  directory, or filetype label; `LISZT_ICONS_OSC66=1` wraps glyphs in
+  kitty's text-sizing protocol for terminal-guaranteed width.
+- `--tree` - structural tree with `--level=N`, `--tree-limit=N`
+  ("... K more" collapsing), `--tree-glyphs=unicode|ascii|auto`. One
+  directory descriptor open at any depth: a 100k-node tree lists under
+  `ulimit -n 16` with identical bytes. The full sort/filter/color/icon
+  surface applies per sibling list; `-l` works with metadata on the
+  left.
+- `--git` - a status column with zero dependencies: liszt parses
+  `.git/index` itself (v2-v4, SHA-256 repos, linked worktrees) and
+  compares stat data - nothing is hashed, adding a constant ~30
+  syscalls per repo and none per entry. `--git-ignore` hides ignored
+  entries through a from-scratch wildmatch engine; `--no-git`
+  suppresses. Limits are documented in liszt(1), not glossed over:
+  staged-only changes read as clean.
+
+Measured against eza (the fastest of the modern replacements), same
+machines as above, artifacts under `bench/release/`:
+
+| workload | vs eza (x86-64) | vs eza (arm64) |
+|---|---|---|
+| 100k `--icons --color -1` | 4.3x | 10.4x |
+| 100k-node `--tree` | 16.2x | 12.7x |
+| 200k-file repo `-l --git` | 11.1x | 15.0x |
+
+Extension cost against plain liszt on the same lanes stays gated:
+icons within 10% on the color lane, `--tree` within 15% of `-R -1`,
+`--git` within 2x of `-l` (measured ~10%).
 
 ## Debug surface
 

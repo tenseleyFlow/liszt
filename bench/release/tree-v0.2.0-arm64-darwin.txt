@@ -1,0 +1,32 @@
+kind=tree
+host=nomad
+os=Darwin 25.4.0 arm64
+liszt_version=liszt 0.1.0
+fixture=build/bench/tree-100k nodes=  100100
+
+fd_ceiling=PASS (identical output under ulimit -n 16)
+tree_lines=  100100
+Benchmark 1: env LC_ALL=C ./liszt -R -1 build/bench/tree-100k
+  Time (mean ± σ):      58.8 ms ±   7.3 ms    [User: 6.7 ms, System: 51.3 ms]
+  Range (min … max):    41.4 ms …  63.3 ms    10 runs
+ 
+  Warning: Statistical outliers were detected. Consider re-running this benchmark on a quiet system without any interferences from other programs. It might help to use the '--warmup' or '--prepare' options.
+ 
+Benchmark 2: env LC_ALL=C ./liszt --tree build/bench/tree-100k
+  Time (mean ± σ):      41.0 ms ±   0.3 ms    [User: 6.8 ms, System: 33.4 ms]
+  Range (min … max):    40.5 ms …  41.5 ms    10 runs
+ 
+Benchmark 3: env LC_ALL=C ./liszt --tree -l build/bench/tree-100k
+  Time (mean ± σ):     273.7 ms ±   2.2 ms    [User: 44.0 ms, System: 227.9 ms]
+  Range (min … max):   271.6 ms … 278.9 ms    10 runs
+ 
+Benchmark 4: env LC_ALL=C eza -T build/bench/tree-100k
+  Time (mean ± σ):     522.6 ms ±  21.0 ms    [User: 499.3 ms, System: 2273.8 ms]
+  Range (min … max):   504.8 ms … 563.0 ms    10 runs
+ 
+Summary
+  env LC_ALL=C ./liszt --tree build/bench/tree-100k ran
+    1.44 ± 0.18 times faster than env LC_ALL=C ./liszt -R -1 build/bench/tree-100k
+    6.68 ± 0.08 times faster than env LC_ALL=C ./liszt --tree -l build/bench/tree-100k
+   12.76 ± 0.52 times faster than env LC_ALL=C eza -T build/bench/tree-100k
+tree_gate=PASS (tree/R1 ratio 0.696 <= 1.15)
