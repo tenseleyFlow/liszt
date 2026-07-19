@@ -138,6 +138,45 @@ or
 .B auto
 (the default: unicode when the locale codeset is UTF-8). Requires
 .BR \-\-tree .
+.TP
+.B \-\-git
+Show a two-character git status cell before each name in long format
+(silently inert otherwise). Dependency-free: liszt reads the repo's
+index directly (formats v2-v4, SHA-256 repos, linked worktrees) and
+compares worktree stat data; nothing is ever hashed. The first
+character is always
+.B \-
+(staged state needs object hashing); the second is
+.B \-
+clean,
+.B M
+modified,
+.B T
+type change,
+.B N
+untracked,
+.B I
+ignored, or
+.B U
+conflict. Directories with tracked content show
+.B \-\-
+without recursing; submodules are never entered. Split-index and
+sparse-index repos, and anything malformed, degrade to a blank column
+(reasons under
+.BR LISZT_DEBUG_GIT=1 ).
+Known limits: staged-only changes read as clean; GIT_DIR and
+core.excludesFile are not consulted; sizes compare modulo 4 GiB.
+.TP
+.B \-\-git\-ignore
+Hide entries ignored by gitignore rules (nested .gitignore files and
+the repository's info/exclude), in any format. Tracked files are
+never hidden. Does not imply
+.BR \-\-git .
+.TP
+.B \-\-no\-git
+Suppress an earlier
+.B \-\-git
+(positional, last wins).
 .SH ENVIRONMENT
 The GNU-compatible variables
 .BR LS_COLORS ,

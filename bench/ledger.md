@@ -17,6 +17,11 @@ Extension lanes (v0.2, dev box, 100k flat, 20 runs):
   150.9ms; eza -T 230.2ms -> liszt 16.2x faster. fd ceiling: identical
   output under ulimit -n 16 (one dirfd at any depth). GNU-parity
   matrix re-run: no lane regressed.
+- git (200k-file one-commit repo, 10 runs): -l 130.2ms -> -l --git
+  142.8ms (ratio 1.097, gate 2.0; 63ns/entry for the whole status
+  path); v4 index 141.9ms (prefix decompression in the noise);
+  --git-ignore -1 44.8ms. eza -l --git 1.583s -> liszt 11.1x faster.
+  Syscalls: +32 constant per repo, +0 per entry (strace-asserted).
 
 Closed entries:
 - macOS -l 100k: was 286ms uncapped-pool vs gls 239ms (E-core

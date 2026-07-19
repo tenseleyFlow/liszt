@@ -2244,6 +2244,10 @@ main(int argc, char **argv)
     if (o.show_git) {
         bool any = false;
         for (int i = 0; i < n_ops; i++) {
+            /* Extracted directories never print in the batch; their
+               listing resolves its own context. */
+            if (ops[i].is_dir)
+                continue;
             const char *nm = ops[i].name;
             const char *sl = strrchr(nm, '/');
             char dbuf[4096];
@@ -2268,7 +2272,7 @@ main(int argc, char **argv)
         }
         if (any)
             for (int i = 0; i < n_ops; i++)
-                if (ops[i].git_status == 0)
+                if (!ops[i].is_dir && ops[i].git_status == 0)
                     ops[i].git_status = ' ';
     }
 
