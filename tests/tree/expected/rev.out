@@ -1,0 +1,12 @@
+top
+|-- zz.txt
+|-- mid_empty
+|-- a2
+|   `-- only.txt
+`-- a1
+    |-- zlast
+    |-- b2.txt
+    `-- b1
+        |-- c2.txt
+        `-- c1
+            `-- d1.txt

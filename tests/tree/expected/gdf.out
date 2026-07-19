@@ -1,0 +1,12 @@
+top
+├── a1
+│   ├── b1
+│   │   ├── c1
+│   │   │   └── d1.txt
+│   │   └── c2.txt
+│   ├── zlast
+│   └── b2.txt
+├── a2
+│   └── only.txt
+├── mid_empty
+└── zz.txt

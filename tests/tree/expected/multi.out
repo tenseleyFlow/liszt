@@ -1,0 +1,8 @@
+chain
+`-- l1
+    `-- l2
+        `-- l3
+            `-- leaf
+
+top/a2
+`-- only.txt
