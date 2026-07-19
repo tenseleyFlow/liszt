@@ -1023,6 +1023,69 @@ if ! LC_ALL=C awk '
     fails=$((fails + 1))
 fi
 
+# 16: --color=full. Metadata pinned via -go (owner names never enter
+# pinned bytes) over a files-only fixture (directory sizes are
+# fs-dependent); classes pinned flat; strip-identity rides a
+# self-comparison.
+cffix="$work/cffix"
+mkdir -p "$cffix"
+printf 'aaaa\n' > "$cffix/plain644"
+printf 'bbbbbbbb\n' > "$cffix/exec755"
+printf 'c\n' > "$cffix/group640"
+printf 'dd\n' > "$cffix/tight600"
+printf 'eeeee\n' > "$cffix/setuid4755"
+printf 'ff\n' > "$cffix/setgid2755"
+printf 'g\n' > "$cffix/sticky1644"
+chmod 644 "$cffix/plain644"
+chmod 755 "$cffix/exec755"
+chmod 640 "$cffix/group640"
+chmod 600 "$cffix/tight600"
+chmod 4755 "$cffix/setuid4755"
+chmod 2755 "$cffix/setgid2755"
+chmod 1644 "$cffix/sticky1644"
+ln -s plain644 "$cffix/lnk"
+mkfifo "$cffix/pipe" 2>/dev/null || true
+touch -h -d '2024-03-05 06:07:08' "$cffix"/*
+mkdir -p "$work/ccfix"
+for f in main.c app.py video.mp4 song.flac notes.pdf secret.gpg \
+    data.tar.gz backup~ Makefile plain.xyz; do
+    printf 'x\n' > "$work/ccfix/$f"
+done
+run_case_ext cf-go-long 16 "full metadata -go long" C 0 \
+    -- --color=full -gon "$cffix"
+run_case_ext cf-classes 16 "full filename classes" C 0 \
+    -- --color=full -1 "$work/ccfix"
+# LS_COLORS wins over the class fallback (inline: run_pinned's empty
+# LS_COLORS would override EXTRA_ENV).
+if [ 16 -le "$active" ]; then
+    cases=$((cases + 1))
+    env -i PATH="$PATH" LC_ALL=C TZ=UTC0 COLUMNS=80 \
+        LS_COLORS='*.c=01;35' LISZT_DEBUG_VERIFY=1 \
+        "$work/liszt.uut" --color=full -1 "$work/ccfix" \
+        > "$work/cfw.out" 2>/dev/null
+    if ! cmp -s "$work/cfw.out" tests/golden/extensions/cf-lsc-wins.out
+    then
+        echo "EXT CASE FAIL [LS_COLORS beats class fallback]" >&2
+        diff -u tests/golden/extensions/cf-lsc-wins.out \
+            "$work/cfw.out" 2>/dev/null | sed -n '1,8p' >&2
+        fails=$((fails + 1))
+    fi
+fi
+
+# Strip-identity: removing SGR from full reproduces always, byte for
+# byte, on a real -l listing (self-comparison; owner names cancel).
+cases=$((cases + 1))
+: > "$work/cf1.out"
+: > "$work/cf2.out"
+run_pinned C "$work/liszt.uut" --color=full -la "$work/icofix" \
+    2>/dev/null | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf1.out"
+run_pinned C "$work/liszt.uut" --color=always -la "$work/icofix" \
+    2>/dev/null | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf2.out"
+if ! cmp -s "$work/cf1.out" "$work/cf2.out"; then
+    echo "EXT CASE FAIL [color=full strip identity]" >&2
+    fails=$((fails + 1))
+fi
+
 # 11: extension-table invisibility guards. The ext_longopts exact-match
 # layer must never perturb GNU-surface parsing: abbreviation matching,
 # ambiguity listings, and unrecognized-option diagnostics all come from

@@ -1,0 +1,10 @@
+Makefile
+app.py
+backup~
+data.tar.gz
+main.c
+notes.pdf
+plain.xyz
+secret.gpg
+song.flac
+video.mp4

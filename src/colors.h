@@ -76,6 +76,14 @@ off_t liszt_color_bytes(void);
 
 /* Emission (put_indicator and friends); track first use for teardown. */
 void liszt_color_put(const struct liszt_binstr *s);
+void liszt_color_put_run(const struct liszt_binstr *const *seqs,
+                         const char *chars, size_t n);
+void liszt_color_put_token(const struct liszt_binstr *seq,
+                           const char *bytes, size_t blen);
+size_t liszt_color_build_run(const struct liszt_binstr *const *seqs,
+                             const char *chars, size_t n, char *out,
+                             size_t cap, off_t *esc);
+void liszt_color_put_prebuilt(const char *bytes, size_t len, off_t esc);
 void liszt_color_put_ind(enum liszt_cind ind);
 void liszt_color_start(const struct liszt_binstr *seq);  /* LEFT seq RIGHT
     with the C_NORM reset dance */

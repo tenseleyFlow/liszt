@@ -657,6 +657,199 @@ liszt_color_prep_non_filename(void)
     }
 }
 
+/* Batched styled-char run: N single bytes each under its own (maybe
+   NULL) style, emitted as ONE write with one accounting update - the
+   --color=full mode string costs 11 regions per line otherwise.
+   Callers must fall back to per-token puts when C_NORM is colored
+   (start's restore-default dance cannot batch). */
+void
+liszt_color_put_run(const struct liszt_binstr *const *seqs,
+                    const char *chars, size_t n)
+{
+    char buf[512];
+    size_t len = 0;
+    off_t esc = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        const struct liszt_binstr *s = seqs[i];
+        if (s == NULL) {
+            buf[len++] = chars[i];
+            continue;
+        }
+        /* First-use prologue stays lazy (GNU put_indicator order):
+           flush the plain prefix, then the reset, then the batch. */
+        if (!used_color) {
+            if (len > 0) {
+                liszt_emit_bytes(buf, len);
+                len = 0;
+            }
+            used_color = true;
+            liszt_color_prep_non_filename();
+        }
+        size_t need = color_indicator[LISZT_C_LEFT].len + s->len
+            + color_indicator[LISZT_C_RIGHT].len + 1
+            + (color_indicator[LISZT_C_END].string != NULL
+                   ? color_indicator[LISZT_C_END].len
+                   : color_indicator[LISZT_C_LEFT].len
+                         + color_indicator[LISZT_C_RESET].len
+                         + color_indicator[LISZT_C_RIGHT].len);
+        if (len + need >= sizeof buf) {
+            liszt_emit_bytes(buf, len);
+            len = 0;
+        }
+        memcpy(buf + len, color_indicator[LISZT_C_LEFT].string,
+               color_indicator[LISZT_C_LEFT].len);
+        len += color_indicator[LISZT_C_LEFT].len;
+        memcpy(buf + len, s->string, s->len);
+        len += s->len;
+        memcpy(buf + len, color_indicator[LISZT_C_RIGHT].string,
+               color_indicator[LISZT_C_RIGHT].len);
+        len += color_indicator[LISZT_C_RIGHT].len;
+        esc += (off_t)(need - 1);
+        buf[len++] = chars[i];
+        if (color_indicator[LISZT_C_END].string != NULL) {
+            memcpy(buf + len, color_indicator[LISZT_C_END].string,
+                   color_indicator[LISZT_C_END].len);
+            len += color_indicator[LISZT_C_END].len;
+        } else {
+            memcpy(buf + len, color_indicator[LISZT_C_LEFT].string,
+                   color_indicator[LISZT_C_LEFT].len);
+            len += color_indicator[LISZT_C_LEFT].len;
+            memcpy(buf + len, color_indicator[LISZT_C_RESET].string,
+                   color_indicator[LISZT_C_RESET].len);
+            len += color_indicator[LISZT_C_RESET].len;
+            memcpy(buf + len, color_indicator[LISZT_C_RIGHT].string,
+                   color_indicator[LISZT_C_RIGHT].len);
+            len += color_indicator[LISZT_C_RIGHT].len;
+        }
+    }
+    escape_bytes += esc;
+    if (len > 0)
+        liszt_emit_bytes(buf, len);
+}
+
+/* One styled token (LEFT seq RIGHT bytes END) as a single write with
+   one accounting update; falls back to the start/prep pair when a
+   colored C_NORM forces the restore-default dance. */
+void
+liszt_color_put_token(const struct liszt_binstr *seq, const char *bytes,
+                      size_t blen)
+{
+    char buf[512];
+    size_t len = 0;
+
+    if (liszt_color_is_colored(LISZT_C_NORM)
+        || blen + 64 > sizeof buf) {
+        liszt_color_start(seq);
+        liszt_emit_bytes(bytes, blen);
+        liszt_color_prep_non_filename();
+        return;
+    }
+    if (!used_color) {
+        used_color = true;
+        liszt_color_prep_non_filename();
+    }
+    memcpy(buf + len, color_indicator[LISZT_C_LEFT].string,
+           color_indicator[LISZT_C_LEFT].len);
+    len += color_indicator[LISZT_C_LEFT].len;
+    memcpy(buf + len, seq->string, seq->len);
+    len += seq->len;
+    memcpy(buf + len, color_indicator[LISZT_C_RIGHT].string,
+           color_indicator[LISZT_C_RIGHT].len);
+    len += color_indicator[LISZT_C_RIGHT].len;
+    off_t esc = (off_t)len;
+    memcpy(buf + len, bytes, blen);
+    len += blen;
+    if (color_indicator[LISZT_C_END].string != NULL) {
+        memcpy(buf + len, color_indicator[LISZT_C_END].string,
+               color_indicator[LISZT_C_END].len);
+        len += color_indicator[LISZT_C_END].len;
+        esc += (off_t)color_indicator[LISZT_C_END].len;
+    } else {
+        memcpy(buf + len, color_indicator[LISZT_C_LEFT].string,
+               color_indicator[LISZT_C_LEFT].len);
+        len += color_indicator[LISZT_C_LEFT].len;
+        memcpy(buf + len, color_indicator[LISZT_C_RESET].string,
+               color_indicator[LISZT_C_RESET].len);
+        len += color_indicator[LISZT_C_RESET].len;
+        memcpy(buf + len, color_indicator[LISZT_C_RIGHT].string,
+               color_indicator[LISZT_C_RIGHT].len);
+        len += color_indicator[LISZT_C_RIGHT].len;
+        esc += (off_t)(color_indicator[LISZT_C_LEFT].len
+                       + color_indicator[LISZT_C_RESET].len
+                       + color_indicator[LISZT_C_RIGHT].len);
+    }
+    escape_bytes += esc;
+    liszt_emit_bytes(buf, len);
+}
+
+/* Pure assembly of a styled run into OUT (no emission): returns byte
+   length, adds SGR overhead into *ESC. The memoized mode-string path
+   builds once and replays via put_prebuilt. */
+size_t
+liszt_color_build_run(const struct liszt_binstr *const *seqs,
+                      const char *chars, size_t n, char *out,
+                      size_t cap, off_t *esc)
+{
+    size_t len = 0;
+    *esc = 0;
+    for (size_t i = 0; i < n; i++) {
+        const struct liszt_binstr *s = seqs[i];
+        size_t need = 1;
+        if (s != NULL)
+            need += color_indicator[LISZT_C_LEFT].len + s->len
+                + color_indicator[LISZT_C_RIGHT].len
+                + (color_indicator[LISZT_C_END].string != NULL
+                       ? color_indicator[LISZT_C_END].len
+                       : color_indicator[LISZT_C_LEFT].len
+                             + color_indicator[LISZT_C_RESET].len
+                             + color_indicator[LISZT_C_RIGHT].len);
+        if (len + need > cap)
+            return 0;
+        if (s == NULL) {
+            out[len++] = chars[i];
+            continue;
+        }
+        memcpy(out + len, color_indicator[LISZT_C_LEFT].string,
+               color_indicator[LISZT_C_LEFT].len);
+        len += color_indicator[LISZT_C_LEFT].len;
+        memcpy(out + len, s->string, s->len);
+        len += s->len;
+        memcpy(out + len, color_indicator[LISZT_C_RIGHT].string,
+               color_indicator[LISZT_C_RIGHT].len);
+        len += color_indicator[LISZT_C_RIGHT].len;
+        out[len++] = chars[i];
+        if (color_indicator[LISZT_C_END].string != NULL) {
+            memcpy(out + len, color_indicator[LISZT_C_END].string,
+                   color_indicator[LISZT_C_END].len);
+            len += color_indicator[LISZT_C_END].len;
+        } else {
+            memcpy(out + len, color_indicator[LISZT_C_LEFT].string,
+                   color_indicator[LISZT_C_LEFT].len);
+            len += color_indicator[LISZT_C_LEFT].len;
+            memcpy(out + len, color_indicator[LISZT_C_RESET].string,
+                   color_indicator[LISZT_C_RESET].len);
+            len += color_indicator[LISZT_C_RESET].len;
+            memcpy(out + len, color_indicator[LISZT_C_RIGHT].string,
+                   color_indicator[LISZT_C_RIGHT].len);
+            len += color_indicator[LISZT_C_RIGHT].len;
+        }
+        *esc += (off_t)(need - 1);
+    }
+    return len;
+}
+
+void
+liszt_color_put_prebuilt(const char *bytes, size_t len, off_t esc)
+{
+    if (!used_color) {
+        used_color = true;
+        liszt_color_prep_non_filename();
+    }
+    escape_bytes += esc;
+    liszt_emit_bytes(bytes, len);
+}
+
 bool
 liszt_color_used(void)
 {

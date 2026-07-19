@@ -236,6 +236,7 @@ CF_STYLE(cf_se_type, "33");
 CF_STYLE(cf_se_range, "36");
 
 static uid_t cf_uid;
+static gid_t cf_gid;
 static gid_t cf_gids[64];
 static int cf_n_gids = -1;
 
@@ -243,6 +244,7 @@ static void
 cf_init_identity(void)
 {
     cf_uid = getuid();
+    cf_gid = getgid();
     cf_n_gids = getgroups(64, cf_gids);
     if (cf_n_gids < 0)
         cf_n_gids = 0;
@@ -251,7 +253,7 @@ cf_init_identity(void)
 static bool
 cf_my_group(gid_t g)
 {
-    if (g == getgid())
+    if (g == cf_gid)
         return true;
     for (int i = 0; i < cf_n_gids; i++)
         if (cf_gids[i] == g)
@@ -267,9 +269,7 @@ cf_put(const struct liszt_binstr *sty, const char *bytes, size_t len)
         liszt_emit_bytes(bytes, len);
         return;
     }
-    liszt_color_start(sty);
-    liszt_emit_bytes(bytes, len);
-    liszt_color_prep_non_filename();
+    liszt_color_put_token(sty, bytes, len);
 }
 
 static const struct liszt_binstr *
@@ -299,12 +299,56 @@ cf_mode_char_style(size_t idx, char ch, bool reg)
     }
 }
 
+/* A listing carries a handful of distinct mode strings: memoize the
+   fully styled bytes and replay them with one write. The first styled
+   emission of the run keeps the slow path so the lazy reset prologue
+   lands in its established position. */
+struct cf_mode_memo {
+    char key[12];
+    bool reg;
+    char bytes[280];
+    size_t len;
+    off_t esc;
+};
+static struct cf_mode_memo cf_memo[16];
+static size_t cf_n_memo;
+
 static size_t
 cf_emit_mode(const char *modebuf, bool reg)
 {
     size_t n = strlen(modebuf);
-    for (size_t i = 0; i < n; i++)
-        cf_put(cf_mode_char_style(i, modebuf[i], reg), modebuf + i, 1);
+    const struct liszt_binstr *seqs[12];
+
+    if (liszt_color_is_colored(LISZT_C_NORM)) {
+        for (size_t i = 0; i < n && i < 12; i++)
+            cf_put(cf_mode_char_style(i, modebuf[i], reg),
+                   modebuf + i, 1);
+        return n;
+    }
+    if (liszt_color_used() && n < 12) {
+        for (size_t i = 0; i < cf_n_memo; i++) {
+            struct cf_mode_memo *mm = &cf_memo[i];
+            if (mm->reg == reg && strcmp(mm->key, modebuf) == 0) {
+                liszt_color_put_prebuilt(mm->bytes, mm->len, mm->esc);
+                return n;
+            }
+        }
+    }
+    for (size_t i = 0; i < n && i < 12; i++)
+        seqs[i] = cf_mode_char_style(i, modebuf[i], reg);
+    if (liszt_color_used() && n < 12 && cf_n_memo < 16) {
+        struct cf_mode_memo *mm = &cf_memo[cf_n_memo];
+        mm->len = liszt_color_build_run(seqs, modebuf, n, mm->bytes,
+                                        sizeof mm->bytes, &mm->esc);
+        if (mm->len > 0) {
+            strcpy(mm->key, modebuf);
+            mm->reg = reg;
+            cf_n_memo++;
+            liszt_color_put_prebuilt(mm->bytes, mm->len, mm->esc);
+            return n;
+        }
+    }
+    liszt_color_put_run(seqs, modebuf, n);
     return n;
 }
 

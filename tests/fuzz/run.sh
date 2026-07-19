@@ -47,6 +47,7 @@ cp ./liszt "$work/liszt.uut"
 : > "$work/u.out"; : > "$work/u.raw"; : > "$work/u.err"
 : > "$work/o.out"; : > "$work/o.raw"; : > "$work/o.err"
 : > "$work/ic0"; : > "$work/ic1"; : > "$work/ic2"; : > "$work/ic2e"
+: > "$work/cf1"; : > "$work/cf2"
 FUZZ_LSC=$(dircolors -b 2>/dev/null | sed -n "s/^LS_COLORS='\(.*\)';\$/\1/p")
 
 normprog() {
@@ -306,6 +307,22 @@ EOF
         if [ $? -ne 0 ] || ! grep -q "unparsable value for LS_ICONS" \
             "$work/ic2e" || ! cmp -s "$work/ic1" "$work/ic2"; then
             echo "FUZZ FAIL trial $t: junk LS_ICONS handling" >&2
+            fails=$((fails + 1))
+        fi
+    fi
+    # --color=full strip-identity sublane (every 7th trial): removing
+    # SGR from the full theme reproduces the always bytes exactly.
+    if [ $((t % 7)) -eq 0 ]; then
+        env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+            LS_COLORS="$FUZZ_LSC" \
+            "$work/liszt.uut" --color=full -la "$tree" 2>/dev/null \
+            | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf1"
+        env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+            LS_COLORS="$FUZZ_LSC" \
+            "$work/liszt.uut" --color=always -la "$tree" 2>/dev/null \
+            | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf2"
+        if ! cmp -s "$work/cf1" "$work/cf2"; then
+            echo "FUZZ FAIL trial $t: color=full strip identity" >&2
             fails=$((fails + 1))
         fi
     fi
