@@ -167,6 +167,10 @@ gen_plan() {
         if (p < 0.1) flags = flags " -u"
         else if (p < 0.2) flags = flags " -c"
         else if (p < 0.25) flags = flags " --time=birth"
+        p = rand()
+        if (p < 0.08) flags = flags " --time-style=iso"
+        else if (p < 0.16) flags = flags " --time-style=full-iso"
+        else if (p < 0.22) flags = flags " --full-time"
         if (rand() < 0.2) flags = flags " -s"
         if (rand() < 0.2) flags = flags " -i"
         if (rand() < 0.15) flags = flags " -n"

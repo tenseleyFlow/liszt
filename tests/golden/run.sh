@@ -85,9 +85,12 @@ normprog() {
 run_pinned() {
     lc="$1"
     shift
-    env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 LS_COLORS= \
-        LISZT_DEBUG_VERIFY=1 "$@"
+    # EXTRA_ENV: optional space-free NAME=VALUE pairs (word-split on
+    # purpose) for cases pinning env-driven behavior (TIME_STYLE).
+    env -i $EXTRA_ENV PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+        LS_COLORS= LISZT_DEBUG_VERIFY=1 "$@"
 }
+EXTRA_ENV=
 
 # --- Phase 1: oracle self-test -------------------------------------------
 
@@ -634,6 +637,41 @@ run_case 7 "-t with -c sorts ctime" C 0 -- -1tc "$fix/times"
 run_case_pin911 7 "time word birth long" C 0 -- -l --time=birth "$fix/times"
 run_case_pin911 7 "time word creation sort" C 0 -- -1 --time=creation "$fix/times"
 run_case_pin911 7 "time word invalid" C 1 -- --time=bogus
+
+# 07C: --time-style. Style resolution runs only under long format; the
+# error cases are 9.11-pinned (x_timestyle_match wording). The dual
+# +FORMAT splits on one embedded newline: older side, then recent.
+dualfmt=$(printf -- '--time-style=+OLD %%Y\nNEW %%m-%%d')
+run_case 7 "style full-iso" C 0 -- -l --time-style=full-iso "$fix/times"
+run_case 7 "style long-iso" C 0 -- -l --time-style=long-iso "$fix/times"
+run_case 7 "style iso" C 0 -- -l --time-style=iso "$fix/times"
+run_case 7 "style iso utf8" "$U8" 0 -- -l --time-style=iso "$fix/times"
+run_case 7 "style locale" C 0 -- -l --time-style=locale "$fix/times"
+run_case 7 "style locale utf8" "$U8" 0 -- -l --time-style=locale "$fix/times"
+run_case 7 "full-time alias" C 0 -- --full-time "$fix/times"
+run_case 7 "full-time atime" C 0 -- --full-time -u "$work/atimes"
+run_case 7 "style plus single" C 0 -- -l --time-style=+%Y-%m-%dT%H:%M "$fix/times"
+run_case 7 "style plus dual" C 0 -- -l "$dualfmt" "$fix/times"
+run_case 7 "style plus empty" C 0 -- -l --time-style=+ "$fix/times"
+run_case 7 "style plus nsec" C 0 -- -l --time-style=+%H:%M:%S.%N "$fix/times"
+run_case 7 "style abbrev full" C 0 -- -l --time-style=full "$fix/times"
+run_case 7 "posix soft locale" C 0 -- -l --time-style=posix-iso "$fix/times"
+run_case 7 "posix hard locale" "$U8" 0 -- -l --time-style=posix-iso "$fix/times"
+run_case 7 "posix repeated" "$U8" 0 -- -l --time-style=posix-posix-long-iso "$fix/times"
+run_case 7 "style unvalidated without -l" C 0 -- -1 --time-style=bogus "$fix/times"
+run_case_pin911 7 "style invalid" C 2 -- -l --time-style=bogus
+run_case_pin911 7 "style ambiguous" C 2 -- -l --time-style=l
+run_case_pin911 7 "style invalid utf8" "$U8" 2 -- -l --time-style=bogus
+badfmt=$(printf -- '--time-style=+a\nb\nc')
+run_case_pin911 7 "style two newlines" C 2 -- -l "$badfmt"
+EXTRA_ENV=TIME_STYLE=long-iso
+run_case 7 "TIME_STYLE env" C 0 -- -l "$fix/times"
+run_case 7 "option beats TIME_STYLE" C 0 -- -l --time-style=iso "$fix/times"
+run_case 7 "TIME_STYLE ignored without -l" C 0 -- -1 "$fix/times"
+EXTRA_ENV=TIME_STYLE=bogus
+run_case_pin911 7 "TIME_STYLE env invalid" C 2 -- -l "$fix/times"
+run_case 7 "TIME_STYLE bogus without -l" C 0 -- -1 "$fix/times"
+EXTRA_ENV=
 
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus

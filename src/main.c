@@ -448,8 +448,10 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
 
     char tbuf[LISZT_TIME_BUFSZ];
     size_t tlen = it->stat_ok && btime_ok
-        ? liszt_timefmt_render(tbuf, st->time) : 0;
-    if (tlen > 0) {
+        ? liszt_timefmt_render(tbuf, st->time) : (size_t)-1;
+    if (tlen != (size_t)-1) {
+        /* Zero-length renders (empty +FORMAT, overflow) still emit the
+           column space - GNU's s stays >= 0 for them. */
         liszt_emit_bytes(tbuf, tlen);
         liszt_emit_byte(' ');
         prefix_len += tlen + 1;

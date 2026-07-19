@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 
 #include "config.h"
 #include "human.h"
+#include "timefmt.h"
 #include "util.h"
 
 /* Hand-rolled parser producing byte-identical diagnostics to GNU ls's
@@ -135,6 +137,7 @@ struct staging {
     int deref_opt;      /* -1 unset, else enum liszt_deref */
     int time_type;      /* enum liszt_timetype; mtime unless overridden */
     bool explicit_time; /* -c/-u/--time seen; feeds the sort rule */
+    const char *time_style_opt;     /* --time-style/--full-time value */
     bool print_owner;
     bool print_group;
     bool print_author;
@@ -256,6 +259,53 @@ argmatch_die(const char *context, const char *arg,
     exit(LISZT_STATUS_MINOR);
 }
 
+/* gnulib hard_locale for LC_TIME: anything but C/POSIX. */
+static bool
+hard_time_locale(void)
+{
+    const char *name = setlocale(LC_TIME, NULL);
+    return name != NULL && strcmp(name, "C") != 0
+        && strcmp(name, "POSIX") != 0;
+}
+
+/* x_timestyle_match (GNU system.h): word matching like argmatch, but
+   failure lists the [posix-] variants plus the +FORMAT hint and exits
+   2 (LS_FAILURE) - unlike ls's other argmatch errors, which exit 1. */
+static int
+timestyle_match(const char *arg)
+{
+    static const char *const words[] = {
+        "full-iso", "long-iso", "iso", "locale"
+    };
+    int match = -1;
+    bool ambiguous = false;
+
+    for (int i = 0; i < 4; i++) {
+        if (strcmp(words[i], arg) == 0)
+            return i;
+        if (strncmp(words[i], arg, strlen(arg)) == 0) {
+            if (match < 0)
+                match = i;
+            else
+                ambiguous = true;   /* all four values are distinct */
+        }
+    }
+    if (match >= 0 && !ambiguous)
+        return match;
+
+    liszt_error(0, "%s argument %s%s%s for %s%s%s",
+                ambiguous ? "ambiguous" : "invalid",
+                liszt_qL(), arg, liszt_qR(),
+                liszt_qL(), "time style", liszt_qR());
+    fprintf(stderr, "Valid arguments are:\n");
+    for (int i = 0; i < 4; i++)
+        fprintf(stderr, "  - [posix-]%s\n", words[i]);
+    fprintf(stderr,
+            "  - +FORMAT (e.g., +%%H:%%M) for a 'date'-style format\n");
+    liszt_try_help_print();
+    exit(LISZT_STATUS_SERIOUS);
+}
+
 static void
 unsupported(const char *display)
 {
@@ -333,6 +383,13 @@ handle(int key, const char *value, const char *display, struct staging *st)
         st->explicit_time = true;
         break;
     }
+    case KEY_FULL_TIME:
+        st->format_opt = LISZT_FMT_LONG;
+        st->time_style_opt = "full-iso";
+        break;
+    case KEY_TIME_STYLE:
+        st->time_style_opt = value;
+        break;
     case 'v':
         st->sort_opt = LISZT_SORT_VERSION;
         break;
@@ -668,6 +725,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .deref_opt = -1,
         .time_type = LISZT_TIME_MTIME,
         .explicit_time = false,
+        .time_style_opt = NULL,
         .print_owner = true,
         .print_group = true,
         .print_author = false,
@@ -773,6 +831,66 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
                     || o->format == LISZT_FMT_LONG)
             ? LISZT_DEREF_NEVER
             : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
+
+    /* --time-style resolves only under long format (GNU decode_switches
+       gates the whole block): a bogus style word without -l is never
+       even validated. TIME_STYLE env fills an absent option; posix-
+       prefixes strip repeatedly in a hard LC_TIME locale and otherwise
+       pin the locale default outright (GNU returns early). */
+    if (o->format == LISZT_FMT_LONG) {
+        const char *style = st.time_style_opt;
+        if (style == NULL)
+            style = getenv("TIME_STYLE");
+        bool use_default = style == NULL;
+        while (!use_default && strncmp(style, "posix-", 6) == 0) {
+            if (!hard_time_locale()) {
+                use_default = true;
+                break;
+            }
+            style += 6;
+        }
+        if (!use_default) {
+            if (style[0] == '+') {
+                const char *p0 = style + 1;
+                const char *nl = strchr(p0, '\n');
+                if (nl != NULL) {
+                    if (strchr(nl + 1, '\n') != NULL)
+                        liszt_die(LISZT_STATUS_SERIOUS, 0,
+                                  "invalid time style format %s%s%s",
+                                  liszt_qL(), liszt_quote_diag(p0),
+                                  liszt_qR());
+                    size_t n0 = (size_t)(nl - p0);
+                    char *older = liszt_xmalloc(n0 + 1);
+                    memcpy(older, p0, n0);
+                    older[n0] = '\0';
+                    liszt_timefmt_set_formats(older, nl + 1);
+                } else {
+                    liszt_timefmt_set_formats(p0, p0);
+                }
+            } else {
+                switch (timestyle_match(style)) {
+                case 0:
+                    liszt_timefmt_set_formats("%Y-%m-%d %H:%M:%S.%N %z",
+                                              "%Y-%m-%d %H:%M:%S.%N %z");
+                    break;
+                case 1:
+                    liszt_timefmt_set_formats("%Y-%m-%d %H:%M",
+                                              "%Y-%m-%d %H:%M");
+                    break;
+                case 2:
+                    liszt_timefmt_set_formats("%Y-%m-%d ",
+                                              "%m-%d %H:%M");
+                    break;
+                default:
+                    /* locale: GNU dcgettext-translates the defaults in
+                       hard LC_TIME locales; the pinned oracle runs
+                       without message catalogs, so the untranslated
+                       formats are the parity target either way. */
+                    break;
+                }
+            }
+        }
+    }
 
     /* Line length (GNU 2272-2303): -w wins; else tty winsize; else
        COLUMNS (invalid warns and falls through); else 80. -w0 and huge
