@@ -268,6 +268,41 @@ EOF
         LS_COLORS="$FUZZ_LSC" LISZT_DEBUG_VERIFY=1 \
         "$work/liszt.uut" "$@" > "$work/u.out" 2> "$work/u.raw"
     urc=$?
+
+    # Icons invariant sublane (every 5th trial): icons output is the
+    # plain output with a glyph+spacing prefix per line, same count,
+    # same exit; junk LS_ICONS soft-fails with the diagnostic and
+    # leaves builtins alive. Oracle knows no --icons, so this lane is
+    # self-differential.
+    if [ $((t % 5)) -eq 0 ]; then
+        env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+            "$work/liszt.uut" --icons=never -1 "$tree" \
+            > "$work/ic0" 2>/dev/null
+        env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+            "$work/liszt.uut" --icons=always -1 "$tree" \
+            > "$work/ic1" 2>/dev/null
+        if ! LC_ALL=C awk 'NR==FNR { off[FNR] = $0; n = FNR; next }
+            { if (FNR > n) { bad = 1; exit }
+              o = off[FNR]
+              if (length($0) <= length(o) ||
+                  substr($0, length($0) - length(o) + 1) != o) {
+                  bad = 1; exit }
+              m = FNR }
+            END { if (m != n) bad = 1; exit bad }' \
+            "$work/ic0" "$work/ic1"; then
+            echo "FUZZ FAIL trial $t: icons pure-prefix invariant" >&2
+            fails=$((fails + 1))
+        fi
+        env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
+            LS_ICONS='*.c=\' \
+            "$work/liszt.uut" --icons=always -1 "$tree" \
+            > "$work/ic2" 2> "$work/ic2e"
+        if [ $? -ne 0 ] || ! grep -q "unparsable value for LS_ICONS" \
+            "$work/ic2e" || ! cmp -s "$work/ic1" "$work/ic2"; then
+            echo "FUZZ FAIL trial $t: junk LS_ICONS handling" >&2
+            fails=$((fails + 1))
+        fi
+    fi
     env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
         LS_COLORS="$FUZZ_LSC" \
         "$oracle" "$@" > "$work/o.out" 2> "$work/o.raw"

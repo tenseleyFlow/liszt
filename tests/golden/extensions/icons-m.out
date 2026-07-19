@@ -1,0 +1,4 @@
+ Makefile,  a.c,  b.rs,  lnk,
+ pipe,  plain,  readme.md,
+ sp ace.c,  subdir,  x.gz,
+ x.tar.gz

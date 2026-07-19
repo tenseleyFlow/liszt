@@ -39,6 +39,8 @@ void liszt_plan_select(const struct liszt_options *o, struct liszt_plan *p);
 
 /* Second pass once the color scheme is parsed: derive what coloring and
    indicators can actually observe. */
+void liszt_plan_icons_update(const struct liszt_options *o,
+                             struct liszt_plan *p);
 void liszt_plan_color_update(const struct liszt_options *o,
                              struct liszt_plan *p);
 

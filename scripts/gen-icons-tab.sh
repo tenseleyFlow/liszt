@@ -49,6 +49,15 @@ function cbytes(s,   r, i) {   # C string escape of raw bytes
         r = r sprintf("\\%03o", ord[substr(s, i, 1)])
     return r
 }
+function cbrace(s,   r, i) {   # brace initializer (no implicit NUL)
+    r = ""
+    for (i = 1; i <= length(s); i++) {
+        if (i > 1) r = r ", "
+        r = r sprintf("(char)0x%02X", ord[substr(s, i, 1)])
+    }
+    while (i <= 4) { r = r ", 0"; i++ }
+    return r
+}
 function hexval(s,   i, c, v) {
     v = 0
     for (i = 1; i <= length(s); i++) {
@@ -107,7 +116,7 @@ END {
     printf "static const struct licon_glyph licon_glyphs[%d] = {\n", nglyph
     for (g = 0; g < nglyph; g++) {
         b = utf8(gcp[g])
-        printf "    { %d, \"%s\" },\n", length(b), cbytes(b)
+        printf "    { %d, { %s } },\n", length(b), cbrace(b)
     }
     printf "};\n\n"
 

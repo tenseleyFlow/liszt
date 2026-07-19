@@ -113,11 +113,13 @@ enum { N_LONGOPTS = sizeof longopts / sizeof longopts[0] };
    byte-identical ("--t" and "--i" listings, "--tre" unrecognized).
    No abbreviation for extension names, by design. Keys from 512. */
 enum {
-    KEY_EXT_BASE = 512
+    KEY_EXT_BASE = 512,
+    KEY_ICONS = KEY_EXT_BASE
 };
 
 static const struct longopt ext_longopts[] = {
-    /* Rows land with their sprints (12: icons; 13: tree; 14: git). */
+    {"icons", ARG_OPT, KEY_ICONS},
+    /* Rows land with their sprints (13: tree; 14: git). */
     {NULL, ARG_NO, 0},
 };
 enum { N_EXT_LONGOPTS = sizeof ext_longopts / sizeof ext_longopts[0] - 1 };
@@ -188,6 +190,7 @@ struct staging {
     int eolbyte;                    /* '\n'; --zero stages 0 */
     bool dired;                     /* -D seen */
     bool print_hyperlink;           /* resolved WHEN, positional */
+    int print_icons_opt;            /* -1 unset, 0 off, 1 on */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -448,11 +451,24 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case 'D':
         /* GNU: -D stages long format and drops --hyperlink; both are
-           positional, later options re-override. */
+           positional, later options re-override. Icons follow the
+           same positional rule. */
         st->format_opt = LISZT_FMT_LONG;
         st->print_hyperlink = false;
+        st->print_icons_opt = 0;
         st->dired = true;
         break;
+    case KEY_ICONS: {
+        /* eza semantics: bare --icons means auto (TTY-gated), a
+           deliberate documented divergence from the GNU bare-WHEN
+           convention. */
+        int v = value ? argmatch_die("--icons", value, when_words,
+                                     when_vals, N_WHEN_WORDS)
+                      : WHEN_IF_TTY;
+        st->print_icons_opt = v == WHEN_ALWAYS
+            || (v == WHEN_IF_TTY && isatty(STDOUT_FILENO));
+        break;
+    }
     case KEY_HYPERLINK: {
         int v = WHEN_ALWAYS;
         if (value)
@@ -464,7 +480,9 @@ handle(int key, const char *value, const char *display, struct staging *st)
     }
     case KEY_ZERO:
         /* GNU's staging effects are positional last-wins: a later -l,
-           -q, -Q, -C or --color re-overrides the individual pieces. */
+           -q, -Q, -C or --color re-overrides the individual pieces.
+           Icons stage off like color. */
+        st->print_icons_opt = 0;
         st->eolbyte = 0;
         st->hide_control_chars_opt = 0;
         if (st->format_opt != LISZT_FMT_LONG)
@@ -832,6 +850,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .eolbyte = '\n',
         .dired = false,
         .print_hyperlink = false,
+        .print_icons_opt = -1,
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -921,8 +940,22 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
        --zero clash is fatal only when dired survives. */
     o->print_scontext = st.print_scontext;
     o->print_hyperlink = st.print_hyperlink;
+    if (st.print_icons_opt < 0) {
+        const char *ie = getenv("LISZT_ICONS");
+        int v = -1;
+        if (ie != NULL && *ie != '\0') {
+            for (int wi = 0; wi < N_WHEN_WORDS; wi++)
+                if (strcmp(when_words[wi], ie) == 0) {
+                    v = when_vals[wi];
+                    break;
+                }
+        }
+        st.print_icons_opt = v == WHEN_ALWAYS
+            || (v == WHEN_IF_TTY && isatty(STDOUT_FILENO));
+    }
+    o->print_icons = st.print_icons_opt == 1;
     o->dired = st.dired && o->format == LISZT_FMT_LONG
-        && !o->print_hyperlink;
+        && !o->print_hyperlink && !o->print_icons;
     if (o->eolbyte == 0 && o->dired)
         liszt_die(LISZT_STATUS_SERIOUS, 0,
                   "--dired and --zero are incompatible");

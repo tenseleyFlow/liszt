@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "colors.h"
+#include "icons.h"
 #include "sortkey.h"
 #include "sys/xstat.h"
 #include "util.h"
@@ -132,4 +133,20 @@ liszt_plan_debug_print(const struct liszt_plan *p)
     if (getenv("LISZT_DEBUG_PLAN") != NULL)
         fprintf(stderr, "%s: plan=%s reason=%s\n", liszt_prog,
                 engine_names[p->sort_engine], p->reason);
+}
+
+void
+liszt_plan_icons_update(const struct liszt_options *o,
+                        struct liszt_plan *p)
+{
+    if (!o->print_icons)
+        return;
+    /* Builtin icon tables observe only name + d_type: the statless
+       plan survives. An LS_ICONS scheme with stat-needing filetype
+       labels (ex/su/sg/ow/st/tw) flips the same bits color would -
+       conservatively both groups (one observe bit; documented). */
+    if (liszt_icons_observe_stat()) {
+        p->stat_exec = true;
+        p->stat_dirs_for_color = true;
+    }
 }

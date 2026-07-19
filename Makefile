@@ -18,6 +18,7 @@ SRC = \
 	src/idcache.c \
 	src/timefmt.c \
 	src/colors.c \
+	src/icons.c \
 	src/quote.c \
 	src/uniwidth.c \
 	src/layout.c \

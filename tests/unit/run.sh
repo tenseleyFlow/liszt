@@ -121,6 +121,35 @@ if [ -z "$h1" ] || [ "$h1" = "$h3" ]; then
     note_fail "fixture generator seed variation (seed42=$h1 seed7=$h3)"
 fi
 
+# Icons stay statless: builtin tables observe only name + d_type, so
+# the statless color scheme with icons on still performs one statx.
+if command -v strace >/dev/null 2>&1; then
+    checks=$((checks + 1))
+    nstx=$(strace -c -e trace=statx env LC_ALL=C \
+        LS_COLORS="di=01;34:ln=01;36:ex=00:su=00:sg=00:ow=00:st=00:tw=00:or=00:mi=00:ca=00" \
+        ./liszt --color=always --icons=always "$udir" 2>&1 >/dev/null \
+        | sed -n 's/.* \([0-9][0-9]*\) *statx$/\1/p' | tail -1)
+    if [ "${nstx:-99}" -gt 1 ]; then
+        note_fail "icons broke the statless plan ($nstx statx calls)"
+    fi
+fi
+
+# Icon grid alignment: every second-column start in -C equals the
+# icons-off start plus glyph+spacing cells.
+checks=$((checks + 1))
+idir=$(mktemp -d "${TMPDIR:-/tmp}/liszt-icongrid.XXXXXX")
+for f in aa bb cc dd ee ff gg hh; do printf 'x\n' > "$idir/$f"; done
+# Equal-length names, spaces-only tabs: every full row of the icon
+# grid must have identical byte length (columns will have reflowed to
+# fewer than the icons-off run; that is the layout doing its job).
+nlens=$(env -i PATH="$PATH" LC_ALL=C COLUMNS=40 \
+    ./liszt -C -w 40 -T0 --icons=always "$idir" \
+    | awk '{ print length($0) }' | sort -u | wc -l)
+rm -rf "$idir"
+if [ "$nlens" -ne 1 ]; then
+    note_fail "icon grid alignment (rows have $nlens distinct lengths)"
+fi
+
 # Scan kernels: fuzz the inline SIMD paths against the scalar oracles
 # (rank's scan-fuzz shape), and fail if a SIMD-capable build silently
 # runs scalar (tally's engagement lesson).

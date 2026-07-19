@@ -83,6 +83,7 @@ struct liszt_options {
     enum liszt_qstyle quoting_style;
     bool print_with_color;
     bool print_hyperlink;
+    bool print_icons;           /* --icons extension (v0.2) */
     enum liszt_indicator_style indicator_style;
     bool qmark_funny_chars;
     bool align_variable_outer_quotes;

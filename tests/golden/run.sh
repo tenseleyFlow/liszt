@@ -920,6 +920,109 @@ printf 'x\n' > "$work/extsmoke/alpha"
 printf 'x\n' > "$work/extsmoke/beta"
 run_case_ext ext-smoke 11 "extension tier smoke" C 0 -- -1 "$work/extsmoke"
 
+# 12: icons. Pinned-bytes cases over a deterministic fixture; identity
+# and ordering properties ride self-comparisons (no oracle knows
+# --icons). Hyperlink+icons ordering is asserted structurally since
+# pinned bytes would embed the hostname.
+mkdir -p "$work/icofix/subdir"
+for f in Makefile a.c b.rs x.tar.gz x.gz plain readme.md; do
+    printf 'x\n' > "$work/icofix/$f"
+    chmod 644 "$work/icofix/$f"
+done
+printf 'x\n' > "$work/icofix/sp ace.c"
+chmod 644 "$work/icofix/sp ace.c"
+printf 'x\n' > "$work/icofix/.hidden.c"
+chmod 644 "$work/icofix/.hidden.c"
+ln -s a.c "$work/icofix/lnk"
+mkfifo "$work/icofix/pipe"
+run_case_ext icons-1 12 "icons single column" C 0 -- --icons=always -1 "$work/icofix"
+run_case_ext icons-1a 12 "icons all" C 0 -- --icons=always -1a "$work/icofix"
+# Long-format icons ride the same emit path; pinned bytes would embed
+# fs-dependent totals/blocks, so assert structure: same line count as
+# icons-off and glyph bytes present.
+cases=$((cases + 1))
+run_pinned C "$work/liszt.uut" -l --icons=always "$work/icofix" > "$work/il1" 2>/dev/null
+run_pinned C "$work/liszt.uut" -l "$work/icofix" > "$work/il0" 2>/dev/null
+if [ "$(wc -l < "$work/il1")" != "$(wc -l < "$work/il0")" ] \
+    || ! grep -q "$(printf '\356\231\263')" "$work/il1"; then
+    echo "EXT CASE FAIL [icons long structure]" >&2
+    fails=$((fails + 1))
+fi
+run_case_ext icons-C 12 "icons columns" C 0 -- --icons=always -C -w 60 "$work/icofix"
+run_case_ext icons-x 12 "icons across" C 0 -- --icons=always -x -w 60 "$work/icofix"
+run_case_ext icons-m 12 "icons commas" C 0 -- --icons=always -m -w 40 "$work/icofix"
+# UTF-8 leg: pinned bytes would embed locale collation order (and $U8
+# varies by platform), so assert the pure-prefix invariant instead:
+# every icons-on line ends with its icons-off line, same line count.
+cases=$((cases + 1))
+run_pinned "$U8" "$work/liszt.uut" --icons=always -1 "$work/icofix" > "$work/iu1" 2>/dev/null
+run_pinned "$U8" "$work/liszt.uut" -1 "$work/icofix" > "$work/iu0" 2>/dev/null
+if ! LC_ALL=C awk 'NR==FNR { off[FNR] = $0; n = FNR; next }
+    { if (FNR > n) { bad = 1; exit }
+      o = off[FNR]
+      if (length($0) <= length(o) ||
+          substr($0, length($0) - length(o) + 1) != o) { bad = 1; exit }
+      m = FNR }
+    END { if (m != n) bad = 1; exit bad }' "$work/iu0" "$work/iu1"; then
+    echo "EXT CASE FAIL [icons utf8 pure-prefix]" >&2
+    fails=$((fails + 1))
+fi
+run_case_ext icons-pad 12 "icons align pad" C 0 -- --icons=always --quoting-style=shell -1 "$work/icofix"
+EXTRA_ENV=LISZT_ICON_SPACING=0
+run_case_ext icons-sp0 12 "icons spacing 0" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV=LISZT_ICON_SPACING=3
+run_case_ext icons-sp3 12 "icons spacing 3" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV=
+
+# LS_ICONS overrides (12C): suffix / exact-name / dirname / label
+# tiers, multi-dot precedence (longest wins), blank-cell kill switch,
+# and junk soft-fail keeping builtins (diagnostic on stderr, exit 0).
+EXTRA_ENV='LS_ICONS=*.c=\xee\x9e\xa8'
+run_case_ext icons-ov-suffix 12 "LS_ICONS suffix" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=Makefile=\xef\x92\x8a'
+run_case_ext icons-ov-name 12 "LS_ICONS filename" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=subdir/=\xee\x98\x8b'
+run_case_ext icons-ov-dir 12 "LS_ICONS dirname" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=di=\xef\x84\x95:fi=\xee\xab\xa8'
+run_case_ext icons-ov-label 12 "LS_ICONS labels" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=*.tar.gz=\xee\x98\x8b:*.gz=\xef\x92\x8a'
+run_case_ext icons-ov-longest 12 "LS_ICONS longest suffix wins" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=Makefile='
+run_case_ext icons-ov-blank 12 "LS_ICONS blank cell" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV='LS_ICONS=*.c=\'
+run_case_ext icons-ov-junk 12 "LS_ICONS junk soft-fail" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV=LISZT_ICONS_OSC66=1
+run_case_ext icons-osc66 12 "OSC 66 width hints" C 0 -- --icons=always -1 "$work/icofix"
+EXTRA_ENV=
+
+# Identity properties (self-comparisons, count as cases).
+ext_self_cmp() {
+    desc="$1"; shift
+    a1="$1"; a2="$2"; a3="$3"; b1="$4"; b2="$5"; b3="$6"
+    cases=$((cases + 1))
+    run_pinned C "$work/liszt.uut" $a1 $a2 $a3 "$work/icofix" > "$work/s1.out" 2>&1
+    run_pinned C "$work/liszt.uut" $b1 $b2 $b3 "$work/icofix" > "$work/s2.out" 2>&1
+    if ! cmp -s "$work/s1.out" "$work/s2.out"; then
+        echo "EXT CASE FAIL [$desc]" >&2
+        fails=$((fails + 1))
+    fi
+}
+ext_self_cmp "icons=never is identity" --icons=never -1 "" -1 "" ""
+ext_self_cmp "icons then zero yields zero" --icons=always --zero "" --zero "" ""
+ext_self_cmp "icons then dired yields dired" --icons=always -D "" -D "" ""
+
+# Hyperlink ordering: every line puts the glyph before the OSC 8 open.
+cases=$((cases + 1))
+run_pinned C "$work/liszt.uut" --icons=always --hyperlink=always -1 \
+    "$work/icofix" > "$work/hl.out" 2>/dev/null
+if ! LC_ALL=C awk '
+    { osc = index($0, "\033]8;;")
+      if (osc == 0 || osc < 5) { bad = 1 } }
+    END { exit bad }' "$work/hl.out"; then
+    echo "EXT CASE FAIL [icons precede hyperlink open]" >&2
+    fails=$((fails + 1))
+fi
+
 # 11: extension-table invisibility guards. The ext_longopts exact-match
 # layer must never perturb GNU-surface parsing: abbreviation matching,
 # ambiguity listings, and unrecognized-option diagnostics all come from

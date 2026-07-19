@@ -22,6 +22,7 @@
 #include "emit.h"
 #include "entry.h"
 #include "human.h"
+#include "icons.h"
 #include "idcache.h"
 #include "layout.h"
 #include "options.h"
@@ -358,23 +359,54 @@ emit_name_colored(const struct litem *it, bool symlink_target,
 
     const struct liszt_binstr *color = NULL;
     bool used_this = false;
-    if (cur_opts->print_with_color) {
-        struct liszt_colorable c;
+    bool want_icon = cur_opts->print_icons && !symlink_target;
+    struct liszt_colorable cinfo;
+    if (cur_opts->print_with_color || want_icon) {
         if (symlink_target) {
-            c.name = it->linkname;
-            c.mode = it->linkmode;
-            c.linkok = it->linkok ? 0 : -1;
+            cinfo.name = it->linkname;
+            cinfo.mode = it->linkmode;
+            cinfo.linkok = it->linkok ? 0 : -1;
         } else {
-            c.name = it->name;
-            c.mode = file_or_link_mode(it);
-            c.linkok = it->linkok;
+            cinfo.name = it->name;
+            cinfo.mode = file_or_link_mode(it);
+            cinfo.linkok = it->linkok;
         }
-        c.ftype = it->ftype;
-        c.stat_ok = it->stat_ok;
-        c.has_capability = it->has_capability;
-        c.multi_hardlink = it->st->nlink > 1;
-        color = liszt_color_for(&c);
+        cinfo.ftype = it->ftype;
+        cinfo.stat_ok = it->stat_ok;
+        cinfo.has_capability = it->has_capability;
+        cinfo.multi_hardlink = it->st->nlink > 1;
+    }
+    if (cur_opts->print_with_color) {
+        color = liszt_color_for(&cinfo);
         used_this = color || liszt_color_is_colored(LISZT_C_NORM);
+    }
+
+    /* Icon prefix (v0.2): own color region so background schemes never
+       bleed into the spacing; outside the OSC 8 hyperlink; never on
+       symlink targets. A blank resolution keeps the cell with spaces. */
+    size_t icon_cells = 0;
+    if (want_icon) {
+        struct liszt_icon ic;
+        unsigned sp = liszt_icon_spacing();
+
+        liszt_icon_for(&cinfo, &ic);
+        icon_cells = 1 + sp;
+        if (ic.len == 0) {
+            for (unsigned k = 0; k < 1 + sp; k++)
+                liszt_emit_byte(' ');
+        } else {
+            if (color)
+                liszt_color_start(color);
+            if (liszt_icon_osc66())
+                liszt_emit_str("\033]66;w=1;");
+            liszt_emit_bytes(ic.bytes, ic.len);
+            if (liszt_icon_osc66())
+                liszt_emit_str("\033\\");
+            if (color)
+                liszt_color_prep_non_filename();
+            for (unsigned k = 0; k < sp; k++)
+                liszt_emit_byte(' ');
+        }
     }
 
     if (padded)
@@ -406,14 +438,15 @@ emit_name_colored(const struct litem *it, bool symlink_target,
     if (used_this) {
         liszt_color_prep_non_filename();
         /* GNU's wrap check uses quote_name's return, which includes
-           the alignment pad byte (fuzz-pinned, seed 1337). */
-        size_t wlen = blen + (padded ? 1u : 0u);
+           the alignment pad byte (fuzz-pinned, seed 1337). Icon cells
+           join it under --icons. */
+        size_t wlen = icon_cells + blen + (padded ? 1u : 0u);
         if (cur_opts->line_length
             && (start_col / cur_opts->line_length
                 != (start_col + wlen - 1) / cur_opts->line_length))
             liszt_color_put_ind(LISZT_C_CLR_TO_EOL);
     }
-    return blen;
+    return icon_cells + blen;
 }
 
 /* The type indicator character, GNU get_type_indicator. */
@@ -1357,6 +1390,8 @@ item_length(const struct liszt_options *o, const struct lwidths *w,
     if (o->print_scontext)
         len += 1 + (o->format == LISZT_FMT_COMMAS
                     ? strlen(it->scontext) : (size_t)w->scontext);
+    if (o->print_icons)
+        len += 1 + liszt_icon_spacing();
     len += (size_t)(it->width + it->padded);
     if (o->indicator_style != LISZT_IND_NONE
         && type_indicator_char(it->stat_ok, it->st->mode, it->ftype,
@@ -1569,8 +1604,11 @@ main(int argc, char **argv)
             o.tabsize = 0;
     }
 
+    if (o.print_icons)
+        liszt_icons_init(&o);
     liszt_plan_select(&o, &plan);
     liszt_plan_color_update(&o, &plan);
+    liszt_plan_icons_update(&o, &plan);
     liszt_plan_debug_print(&plan);
     liszt_sort_init(&o, &plan);
 
