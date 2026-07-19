@@ -19,6 +19,7 @@ SRC = \
 	src/timefmt.c \
 	src/colors.c \
 	src/quote.c \
+	src/uniwidth.c \
 	src/layout.c \
 	src/emit.c \
 	src/recurse.c \

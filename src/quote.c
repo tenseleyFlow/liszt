@@ -8,11 +8,40 @@
 #include <wchar.h>
 #include <wctype.h>
 
+#include "config.h"
+#include "uniwidth.h"
 #include "util.h"
 
 /* wchar_t is UTF-32 on every supported platform (Linux glibc/musl,
    macOS, FreeBSD), so mbrtowc/iswprint/wcwidth stand in for the
-   mbrtoc32/c32isprint/c32width calls in the pinned tree. */
+   mbrtoc32/c32isprint/c32width calls in the pinned tree. Width follows
+   gnulib's per-platform decision: where libc wcwidth fails the
+   conformance probe (LISZT_REPLACE_WCWIDTH - macOS), UTF-8 locales
+   route through the ported uniwidth tables like rpl_wcwidth does;
+   printability stays libc iswprint everywhere (c32isprint is
+   WCHAR_FUNC on both glibc and BSD paths). */
+
+#if LISZT_REPLACE_WCWIDTH
+static int
+locale_is_utf8(void)
+{
+    static int cached = -1;
+
+    if (cached < 0)
+        cached = strcmp(nl_langinfo(CODESET), "UTF-8") == 0;
+    return cached;
+}
+#endif
+
+static int
+backend_wcwidth(wchar_t wc)
+{
+#if LISZT_REPLACE_WCWIDTH
+    if (locale_is_utf8())
+        return liszt_uc_width((uint32_t)wc);
+#endif
+    return wcwidth(wc);
+}
 
 enum { INT_BITS = (int)(sizeof (int) * CHAR_BIT) };
 
@@ -36,13 +65,13 @@ cached_wcwidth(wchar_t wc)
     static signed char *tab;    /* wcwidth + 2, 0 = unfilled */
 
     if ((unsigned long)wc >= 0x10000ul)
-        return wcwidth(wc);
+        return backend_wcwidth(wc);
     if (!tab) {
         tab = liszt_xmalloc(0x10000);
         memset(tab, 0, 0x10000);
     }
     if (tab[wc] == 0) {
-        int w = wcwidth(wc);
+        int w = backend_wcwidth(wc);
         tab[wc] = (signed char)(w + 2);
     }
     return tab[wc] - 2;
@@ -51,11 +80,13 @@ cached_wcwidth(wchar_t wc)
 static int
 cached_iswprint(wchar_t wc)
 {
-    /* wcwidth >= 0 implies printable on our platforms; match gnulib's
-       c32width-based printability where possible, falling back to
-       iswprint for width -1 cases. */
+#if !LISZT_REPLACE_WCWIDTH
+    /* Libc wcwidth >= 0 implies printable here; the uniwidth backend
+       has no such invariant (unassigned code points get width 1), so
+       replaced platforms always ask iswprint. */
     if (cached_wcwidth(wc) >= 0)
         return 1;
+#endif
     return iswprint((wint_t)wc);
 }
 

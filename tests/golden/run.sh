@@ -194,12 +194,12 @@ run_case_pin911() {
 # width classification. GNU bundles gnulib's own tables; liszt reads the
 # platform libc's, which agree on Linux/FreeBSD but not Darwin. Sprint 07
 # ports the gnulib tables and lifts this guard (tracked deviation).
-tables_ok=1
-[ "$(uname -s)" = "Darwin" ] && tables_ok=0
+# Exotic-code-point cases ran everywhere once sprint 07F ported the
+# gnulib uniwidth tables (liszt mirrors the oracle's REPLACE_WCWIDTH
+# decision per platform); the 9.11 pin remains because the table
+# vintage tracks the oracle release.
 run_case_tables() {
-    if [ "$tables_ok" -eq 1 ]; then
-        run_case_pin911 "$@"
-    fi
+    run_case_pin911 "$@"
 }
 
 # run_case SPRINT name locale wantrc -- flags/operands...
@@ -246,6 +246,10 @@ mkdir -p "$work/devdir"
 for n in aa bb cc dd ee ff; do printf 'x\n' > "$work/devdir/$n"; done
 printf 'x\n' > "$work/devdir/$(printf 'ctl\007x')"
 { printf 'x\n' > "$work/devdir/$(printf 'inv\200x')"; } 2>/dev/null || true
+# The deviation registry pins exact bytes including the invalid-mb name;
+# a filesystem that refuses such names (APFS) cannot host those cases.
+devdir_ok=1
+[ -e "$work/devdir/$(printf 'inv\200x')" ] || devdir_ok=0
 
 # run_case_dev SLUG SPRINT desc locale wantrc -- args...
 # Deviation registry (.docs/deviations.md): liszt must match the pinned
@@ -256,7 +260,7 @@ run_case_dev() {
     shift 5
     [ "$1" = "--" ] && shift
     [ "$tag" -le "$active" ] || return 0
-    [ "$tables_ok" -eq 1 ] || return 0
+    [ "$devdir_ok" -eq 1 ] || return 0
     cases=$((cases + 1))
     exp="tests/golden/deviations/$slug.out"
     run_pinned "$lc" "$work/liszt.uut" "$@" > "$work/u.out" 2>/dev/null

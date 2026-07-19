@@ -31,6 +31,23 @@ try_compile() {
     return 1
 }
 
+# Compile AND execute; returns the program's exit status (127 when the
+# compile itself fails). For runtime-behavior probes (wcwidth tables).
+try_run() {
+    name="$1"
+    code="$2"
+    printf '%s\n' "$code" > "build/probe_$name.c"
+    if ! "$cc" -std=c11 -D_DEFAULT_SOURCE $extra_cppflags \
+        -o "build/probe_$name" "build/probe_$name.c" 2>/dev/null; then
+        rm -f "build/probe_$name.c" "build/probe_$name"
+        return 127
+    fi
+    "build/probe_$name"
+    rc=$?
+    rm -f "build/probe_$name.c" "build/probe_$name"
+    return $rc
+}
+
 have_statx=0
 try_compile statx '
 #include <sys/stat.h>
@@ -115,6 +132,38 @@ long probe(void);
 long probe(void) { struct stat st = {0}; return (long)st.st_birthtimespec.tv_nsec; }
 ' && have_st_birthtimespec=1
 
+# gnulib m4/wcwidth.m4 conformance probe, verbatim checks: where libc
+# wcwidth fails (macOS), liszt routes UTF-8 width through the ported
+# uniwidth tables exactly as gnulib REPLACE_WCWIDTH does - matching the
+# oracle build's own configure decision on each platform. A box without
+# en_US.UTF-8 passes vacuously (result 0), like the m4 test. Execution
+# failure falls back to the m4 cross-compile guesses.
+replace_wcwidth=0
+try_run wcwidth_works '
+#include <locale.h>
+#include <wchar.h>
+int main(void) {
+  int result = 0;
+  if (setlocale(LC_ALL, "en_US.UTF-8") != (char *)0) {
+    if (wcwidth(0x0301) > 0) result |= 1;
+    if (wcwidth(0x05B0) > 0) result |= 2;
+    if (wcwidth(0x200B) > 0) result |= 4;
+    if (wcwidth(0xFF1A) == 0) result |= 8;
+    if (wcwidth(0x2202) > 1) result |= 16;
+  }
+  return result;
+}
+'
+rc=$?
+if [ "$rc" -eq 127 ]; then
+    case "$(uname -s)" in
+    Linux) replace_wcwidth=0 ;;      # glibc/musl guess yes-works
+    *) replace_wcwidth=1 ;;
+    esac
+elif [ "$rc" -ne 0 ]; then
+    replace_wcwidth=1
+fi
+
 case "$(uname -m)" in
 x86_64|amd64|aarch64|arm64) endian=little ;;
 *) endian=unknown ;;
@@ -135,6 +184,7 @@ cat > config.h <<EOF
 #define LISZT_HAVE_ST_MTIMESPEC $have_st_mtimespec
 #define LISZT_HAVE_ST_BIRTHTIM $have_st_birthtim
 #define LISZT_HAVE_ST_BIRTHTIMESPEC $have_st_birthtimespec
+#define LISZT_REPLACE_WCWIDTH $replace_wcwidth
 #define LISZT_ENDIAN_$endian 1
 #endif
 EOF
