@@ -1043,8 +1043,8 @@ chmod 600 "$cffix/tight600"
 chmod 4755 "$cffix/setuid4755"
 chmod 2755 "$cffix/setgid2755"
 chmod 1644 "$cffix/sticky1644"
-ln -s plain644 "$cffix/lnk"
 mkfifo "$cffix/pipe" 2>/dev/null || true
+chmod 644 "$cffix/pipe" 2>/dev/null || true
 touch -h -d '2024-03-05 06:07:08' "$cffix"/*
 mkdir -p "$work/ccfix"
 for f in main.c app.py video.mp4 song.flac notes.pdf secret.gpg \
@@ -1053,6 +1053,17 @@ for f in main.c app.py video.mp4 song.flac notes.pdf secret.gpg \
 done
 run_case_ext cf-go-long 16 "full metadata -go long" C 0 \
     -- --color=full -gon "$cffix"
+# Symlink mode bits are platform umask policy (777 Linux, 755 Darwin):
+# the type-char color rides a structural check instead of pinned bytes.
+if [ 16 -le "$active" ]; then
+    cases=$((cases + 1))
+    ln -s plain644 "$work/cflnk"
+    if ! run_pinned C "$work/liszt.uut" --color=full -l "$work/cflnk" \
+        2>/dev/null | grep -q "36ml"; then
+        echo "EXT CASE FAIL [full symlink type char]" >&2
+        fails=$((fails + 1))
+    fi
+fi
 run_case_ext cf-classes 16 "full filename classes" C 0 \
     -- --color=full -1 "$work/ccfix"
 # LS_COLORS wins over the class fallback (inline: run_pinned's empty
