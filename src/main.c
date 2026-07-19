@@ -133,10 +133,10 @@ widths_add(struct lwidths *w, const struct liszt_options *o,
     }
 
     if (S_ISCHR(st->mode) || S_ISBLK(st->mode)) {
-        len = digits_umax(major(st->rdev));
+        len = digits_umax((uintmax_t)major(st->rdev));
         if (w->major < len)
             w->major = len;
-        len = digits_umax(minor(st->rdev));
+        len = digits_umax((uintmax_t)minor(st->rdev));
         if (w->minor < len)
             w->minor = len;
         len = w->major + 2 + w->minor;
