@@ -1,8 +1,11 @@
 #include "options.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -140,7 +143,43 @@ struct staging {
     uintmax_t output_block_size;    /* 0 = unset, resolve from env */
     int file_human_output_opts;
     uintmax_t file_output_block_size;
+    int quoting_style_opt;          /* -1 unset */
+    int hide_control_chars_opt;     /* -1 unset */
+    long width_opt;                 /* -1 unset */
+    long tabsize_opt;               /* -1 unset */
 };
+
+/* --quoting-style words, GNU order. */
+static const char *const qstyle_words[] = {
+    "literal", "shell", "shell-always", "shell-escape",
+    "shell-escape-always", "c", "c-maybe", "escape", "locale", "clocale"
+};
+enum { N_QSTYLE_WORDS = sizeof qstyle_words / sizeof qstyle_words[0] };
+static const int qstyle_vals[] = {
+    LISZT_QS_LITERAL, LISZT_QS_SHELL, LISZT_QS_SHELL_ALWAYS,
+    LISZT_QS_SHELL_ESCAPE, LISZT_QS_SHELL_ESCAPE_ALWAYS, LISZT_QS_C,
+    LISZT_QS_C_MAYBE, LISZT_QS_ESCAPE, LISZT_QS_LOCALE, LISZT_QS_CLOCALE
+};
+
+/* GNU decode_line_length: base-0 integer, full-string, capped; -1 on
+   any parse failure or overflow-to-invalid. */
+static long
+decode_line_length(const char *spec)
+{
+    char *end;
+    unsigned long long v;
+
+    if (!(*spec >= '0' && *spec <= '9') && *spec != '0')
+        if (!(*spec >= '0' && *spec <= '9'))
+            return -1;
+    errno = 0;
+    v = strtoull(spec, &end, 0);
+    if (end == spec || *end != '\0')
+        return -1;
+    if (errno == ERANGE || v > (unsigned long long)LONG_MAX / 2)
+        return 0;   /* huge widths mean unlimited, matching GNU's cap */
+    return (long)v;
+}
 
 static void
 print_valid_words(const char *const *words, const int *vals, int n)
@@ -287,6 +326,60 @@ handle(int key, const char *value, const char *display, struct staging *st)
     case 'k':
         st->kibibytes_specified = true;
         break;
+    case 'C':
+        st->format_opt = LISZT_FMT_MANY;
+        break;
+    case 'x':
+        st->format_opt = LISZT_FMT_HORIZONTAL;
+        break;
+    case 'm':
+        st->format_opt = LISZT_FMT_COMMAS;
+        break;
+    case 'b':
+        st->quoting_style_opt = LISZT_QS_ESCAPE;
+        break;
+    case 'N':
+        st->quoting_style_opt = LISZT_QS_LITERAL;
+        break;
+    case 'Q':
+        st->quoting_style_opt = LISZT_QS_C;
+        break;
+    case KEY_QUOTING_STYLE:
+        st->quoting_style_opt =
+            argmatch_die("--quoting-style", value, qstyle_words,
+                         qstyle_vals, N_QSTYLE_WORDS);
+        break;
+    case 'q':
+        st->hide_control_chars_opt = 1;
+        break;
+    case KEY_SHOW_CONTROL_CHARS:
+        st->hide_control_chars_opt = 0;
+        break;
+    case 'w': {
+        long ll = decode_line_length(value);
+        if (ll < 0) {
+            liszt_error(0, "invalid line width: %s%s%s", liszt_qL(),
+                        liszt_quote_diag(value), liszt_qR());
+            exit(LISZT_STATUS_SERIOUS);
+        }
+        st->width_opt = ll;
+        break;
+    }
+    case 'T': {
+        char *end;
+        unsigned long long v;
+        errno = 0;
+        v = strtoull(value, &end, 0);
+        if (end == value || *end != '\0' || errno == ERANGE
+            || v > (unsigned long long)LONG_MAX
+            || !(*value >= '0' && *value <= '9')) {
+            liszt_error(0, "invalid tab size: %s%s%s", liszt_qL(),
+                        liszt_quote_diag(value), liszt_qR());
+            exit(LISZT_STATUS_SERIOUS);
+        }
+        st->tabsize_opt = (long)v;
+        break;
+    }
     case KEY_BLOCK_SIZE: {
         enum liszt_strtol_error e =
             liszt_human_options(value, &st->human_output_opts,
@@ -481,7 +574,11 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .human_output_opts = 0,
         .output_block_size = 0,
         .file_human_output_opts = 0,
-        .file_output_block_size = 0
+        .file_output_block_size = 0,
+        .quoting_style_opt = -1,
+        .hide_control_chars_opt = -1,
+        .width_opt = -1,
+        .tabsize_opt = -1
     };
     bool posixly = getenv("POSIXLY_CORRECT") != NULL;
     bool no_more_options = false;
@@ -564,12 +661,104 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         ? LISZT_DEREF_NEVER
         : LISZT_DEREF_COMMAND_LINE_SYMLINK_TO_DIR;
 
-    /* Capability gate: clear exits, never wrong output. Narrows as
-       sprints land. */
-    if (o->format != LISZT_FMT_ONE && o->format != LISZT_FMT_LONG)
-        liszt_die(LISZT_STATUS_SERIOUS, 0,
-                  "only single-column and long output are supported yet"
-                  " (use -1, -l, or pipe stdout)");
+    /* Line length (GNU 2272-2303): -w wins; else tty winsize; else
+       COLUMNS (invalid warns and falls through); else 80. -w0 and huge
+       values mean unlimited. */
+    long linelen = st.width_opt;
+    bool multi = o->format == LISZT_FMT_MANY
+        || o->format == LISZT_FMT_HORIZONTAL
+        || o->format == LISZT_FMT_COMMAS;
+    if (multi) {
+        if (linelen < 0 && isatty(STDOUT_FILENO)) {
+            struct winsize ws;
+            if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) >= 0
+                && 0 < ws.ws_col)
+                linelen = ws.ws_col;
+        }
+        if (linelen < 0) {
+            const char *p = getenv("COLUMNS");
+            if (p && *p) {
+                linelen = decode_line_length(p);
+                if (linelen < 0)
+                    liszt_error(0, "ignoring invalid width in environment"
+                                " variable COLUMNS: %s%s%s", liszt_qL(),
+                                liszt_quote_diag(p), liszt_qR());
+            }
+        }
+    }
+    o->line_length = linelen < 0 ? 80 : (size_t)linelen;
+    o->max_idx = o->line_length / 3 + (o->line_length % 3 != 0);
+
+    o->tabsize = 8;
+    if (multi) {
+        if (st.tabsize_opt >= 0) {
+            o->tabsize = (size_t)st.tabsize_opt;
+        } else {
+            const char *p = getenv("TABSIZE");
+            if (p) {
+                char *end;
+                errno = 0;
+                unsigned long long v = strtoull(p, &end, 0);
+                if (end != p && *end == '\0' && errno != ERANGE
+                    && (*p >= '0' && *p <= '9'))
+                    o->tabsize = (size_t)v;
+                else
+                    liszt_error(0, "ignoring invalid tab size in"
+                                " environment variable TABSIZE: %s%s%s",
+                                liszt_qL(), liszt_quote_diag(p),
+                                liszt_qR());
+            }
+        }
+    }
+
+    /* -q resolution: flag wins, else tty default. */
+    o->qmark_funny_chars = st.hide_control_chars_opt >= 0
+        ? st.hide_control_chars_opt != 0
+        : isatty(STDOUT_FILENO);
+
+    /* Quoting style: flag > QUOTING_STYLE env (invalid warns) > tty
+       shell-escape / piped literal. */
+    int qs = st.quoting_style_opt;
+    if (qs < 0) {
+        const char *p = getenv("QUOTING_STYLE");
+        if (p) {
+            int found = -1;
+            for (int i = 0; i < N_QSTYLE_WORDS; i++)
+                if (strcmp(p, qstyle_words[i]) == 0) {
+                    found = qstyle_vals[i];
+                    break;
+                }
+            if (found >= 0)
+                qs = found;
+            else
+                liszt_error(0, "ignoring invalid value of environment"
+                            " variable QUOTING_STYLE: %s%s%s", liszt_qL(),
+                            liszt_quote_diag(p), liszt_qR());
+        }
+    }
+    if (qs < 0)
+        qs = isatty(STDOUT_FILENO) ? LISZT_QS_SHELL_ESCAPE
+                                   : LISZT_QS_LITERAL;
+    o->quoting_style = (enum liszt_qstyle)qs;
+
+    o->align_variable_outer_quotes =
+        (o->format == LISZT_FMT_LONG
+         || ((o->format == LISZT_FMT_MANY
+              || o->format == LISZT_FMT_HORIZONTAL)
+             && o->line_length))
+        && (o->quoting_style == LISZT_QS_SHELL
+            || o->quoting_style == LISZT_QS_SHELL_ESCAPE
+            || o->quoting_style == LISZT_QS_C_MAYBE);
+
+    memset(&o->filename_qopts, 0, sizeof o->filename_qopts);
+    o->filename_qopts.style = o->quoting_style;
+    if (o->quoting_style == LISZT_QS_ESCAPE)
+        liszt_set_char_quoting(&o->filename_qopts, ' ', 1);
+    o->dirname_qopts = o->filename_qopts;
+    liszt_set_char_quoting(&o->dirname_qopts, ':', 1);
+
+    /* Capability gate: sorts fully covered except width (04E wires it
+       against the quoted-width cache). */
     switch (o->sort) {
     case LISZT_SORT_NONE:
     case LISZT_SORT_NAME:
@@ -577,6 +766,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     case LISZT_SORT_VERSION:
     case LISZT_SORT_SIZE:
     case LISZT_SORT_TIME:
+    case LISZT_SORT_WIDTH:
         break;
     default:
         liszt_die(LISZT_STATUS_SERIOUS, 0,

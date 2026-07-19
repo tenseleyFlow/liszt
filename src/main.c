@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <inttypes.h>
+#include <stddef.h>
 #include <locale.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,8 +18,10 @@
 #include "entry.h"
 #include "human.h"
 #include "idcache.h"
+#include "layout.h"
 #include "options.h"
 #include "plan.h"
+#include "quote.h"
 #include "sortkey.h"
 #include "sys/xstat.h"
 #include "timefmt.h"
@@ -27,6 +30,8 @@
 #define ST_NBLOCKSIZE 512
 
 static struct liszt_plan plan;
+static const struct liszt_options *cur_opts;
+static bool cur_some_quoted;
 
 static void
 file_failure(bool serious, const char *fmt_with_name, const char *name,
@@ -62,12 +67,17 @@ struct lwidths {
    command-line operands compile into this. */
 struct litem {
     const char *name;
+    const char *qname;          /* display form (may equal name) */
+    size_t qlen;
+    int width;                  /* display width, no pad */
     const struct liszt_statinfo *st;
     const char *linkname;       /* NULL = none */
     mode_t linkmode;
     enum liszt_ftype ftype;
     unsigned char stat_ok;
     unsigned char acl;          /* 0 none, 1 '.', 2 '+' */
+    unsigned char quoted;
+    unsigned char padded;
 };
 
 static int
@@ -151,6 +161,25 @@ widths_add(struct lwidths *w, const struct liszt_options *o,
     }
 }
 
+/* Whether this run needs display widths (columns, commas, width sort). */
+static bool
+needs_widths(const struct liszt_options *o)
+{
+    return o->format == LISZT_FMT_MANY
+        || o->format == LISZT_FMT_HORIZONTAL
+        || o->format == LISZT_FMT_COMMAS
+        || o->sort == LISZT_SORT_WIDTH;
+}
+
+/* The align pad byte, then the display bytes. */
+static void
+emit_name(const struct litem *it)
+{
+    if (it->padded)
+        liszt_emit_byte(' ');
+    liszt_emit_bytes(it->qname, it->qlen);
+}
+
 /* Inode and blocks prefixes shared by every format (-i, -s). */
 static void
 emit_frills(const struct liszt_options *o, const struct lwidths *w,
@@ -158,12 +187,15 @@ emit_frills(const struct liszt_options *o, const struct lwidths *w,
 {
     char buf[64 + LISZT_LONGEST_HUMAN_READABLE];
     char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
+    bool commas = o->format == LISZT_FMT_COMMAS;
+    int iw = commas ? 0 : w->inode;
+    int bw = commas ? 0 : w->blocks;
 
     if (o->print_inode) {
         int n = it->stat_ok
-            ? snprintf(buf, sizeof buf, "%*ju ", w->inode,
+            ? snprintf(buf, sizeof buf, "%*ju ", iw,
                        (uintmax_t)it->st->ino)
-            : snprintf(buf, sizeof buf, "%*s ", w->inode, "?");
+            : snprintf(buf, sizeof buf, "%*s ", iw, "?");
         liszt_emit_bytes(buf, (size_t)n);
     }
     if (o->print_block_size) {
@@ -172,7 +204,7 @@ emit_frills(const struct liszt_options *o, const struct lwidths *w,
             : liszt_human_readable((uintmax_t)it->st->blocks, hbuf,
                                    o->human_output_opts, ST_NBLOCKSIZE,
                                    o->output_block_size);
-        int n = snprintf(buf, sizeof buf, "%*s ", w->blocks, blocks);
+        int n = snprintf(buf, sizeof buf, "%*s ", bw, blocks);
         liszt_emit_bytes(buf, (size_t)n);
     }
 }
@@ -283,10 +315,20 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         liszt_emit_bytes(buf, (size_t)n);
     }
 
-    liszt_emit_str(it->name);
+    emit_name(it);
     if (it->ftype == LISZT_T_LNK && it->linkname) {
         liszt_emit_str(" -> ");
-        liszt_emit_str(it->linkname);
+        /* Targets always take the general-quoting path, but never the
+           align pad (both pinned by fuzz vs the oracle). */
+        size_t lt_len;
+        int lt_width;
+        bool lt_quoted;
+        const char *tq = liszt_quote_name(it->linkname,
+                                          &cur_opts->filename_qopts,
+                                          cur_opts->qmark_funny_chars,
+                                          false, &lt_len, &lt_width,
+                                          &lt_quoted);
+        liszt_emit_bytes(tq, lt_len);
     }
     liszt_emit_byte('\n');
 }
@@ -299,7 +341,7 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
         emit_long_entry(o, w, it);
     } else {
         emit_frills(o, w, it);
-        liszt_emit_str(it->name);
+        emit_name(it);
         liszt_emit_byte('\n');
     }
 }
@@ -308,12 +350,17 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
 
 struct operand {
     const char *name;
+    char *qname;                /* malloc'd display form, or NULL = raw */
+    size_t qlen;
+    int disp_width;
     struct liszt_statinfo st;
     char *linkname;
     mode_t linkmode;
     enum liszt_ftype ftype;
     unsigned char stat_ok;
     unsigned char acl;
+    unsigned char quoted;
+    unsigned char padded;
     bool is_dir;
 };
 
@@ -324,7 +371,64 @@ operand_item(const void *p, struct liszt_item *out)
     out->name = op->name;
     out->size = op->st.size;
     out->mtime = op->st.mtime;
+    out->width = (int)((size_t)(ptrdiff_t)op->disp_width + op->padded);
     out->group_dir = false;     /* grouping cannot affect operand output */
+}
+
+/* Operand decoration mirrors the entry pass; the quoted probe spans the
+   whole batch (dirs included) for the align pad, exactly as gobble
+   accumulates cwd_some_quoted before extraction. */
+static void
+decorate_operands(const struct liszt_options *o, struct operand *ops,
+                  int n_ops)
+{
+    bool bytes_can_change = o->quoting_style != LISZT_QS_LITERAL
+        || o->qmark_funny_chars;
+    bool want_width = needs_widths(o);
+
+    cur_some_quoted = false;
+    if (!bytes_can_change && !want_width
+        && !o->align_variable_outer_quotes)
+        return;
+    for (int i = 0; i < n_ops; i++) {
+        size_t qlen;
+        int width = 0;
+        bool quoted;
+        const char *q = liszt_quote_name(ops[i].name,
+                                         &o->filename_qopts,
+                                         o->qmark_funny_chars, want_width,
+                                         &qlen, &width, &quoted);
+        if (qlen != strlen(ops[i].name)
+            || memcmp(q, ops[i].name, qlen) != 0) {
+            ops[i].qname = liszt_xmalloc(qlen + 1);
+            memcpy(ops[i].qname, q, qlen + 1);
+        }
+        ops[i].qlen = qlen;
+        ops[i].disp_width = width;
+        ops[i].quoted = quoted;
+        if (quoted)
+            cur_some_quoted = true;
+    }
+    for (int i = 0; i < n_ops; i++)
+        ops[i].padded = o->align_variable_outer_quotes && cur_some_quoted
+            && !ops[i].quoted;
+}
+
+static void
+operand_to_litem(const struct operand *op, struct litem *it)
+{
+    it->name = op->name;
+    it->qname = op->qname ? op->qname : op->name;
+    it->qlen = op->qname ? op->qlen : strlen(op->name);
+    it->width = op->disp_width;
+    it->quoted = op->quoted;
+    it->padded = op->padded;
+    it->st = &op->st;
+    it->linkname = op->linkname;
+    it->linkmode = op->linkmode;
+    it->ftype = op->ftype;
+    it->stat_ok = op->stat_ok;
+    it->acl = op->acl;
 }
 
 static enum liszt_ftype
@@ -503,6 +607,16 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
         es->meta ? &es->meta[e->meta_idx] : NULL;
 
     it->name = liszt_entry_name(es, e);
+    if (m && m->quoted_off != UINT32_MAX) {
+        it->qname = (const char *)es->arena + m->quoted_off;
+        it->qlen = m->quoted_len;
+    } else {
+        it->qname = it->name;
+        it->qlen = e->name_len;
+    }
+    it->width = m ? m->disp_width : 0;
+    it->quoted = m ? m->quoted : 0;
+    it->padded = m ? m->padded : 0;
     it->st = m ? &m->st : &zero_st;
     it->linkname = (m && m->link_off != UINT32_MAX)
         ? (const char *)es->arena + m->link_off
@@ -513,6 +627,49 @@ entry_to_item(const struct liszt_entries *es, const struct liszt_entry *e,
     it->acl = m ? m->acl : 0;
 }
 
+/* The decoration pass: quoted display form, width, quoted flag - once
+   per entry, before sorting (width sort reads the cache). The plain
+   piped path (literal style, no qmark, no widths) skips everything. */
+static void
+decorate_entries(const struct liszt_options *o, struct liszt_entries *es)
+{
+    bool bytes_can_change = o->quoting_style != LISZT_QS_LITERAL
+        || o->qmark_funny_chars;
+    bool want_width = needs_widths(o);
+
+    cur_some_quoted = false;
+    if (!bytes_can_change && !want_width
+        && !o->align_variable_outer_quotes)
+        return;
+    liszt_entries_ensure_meta(es);
+
+    for (size_t i = 0; i < es->len; i++) {
+        struct liszt_entry *e = &es->v[i];
+        struct liszt_entrymeta *m = &es->meta[e->meta_idx];
+        size_t qlen;
+        int width = 0;
+        bool quoted;
+        const char *q = liszt_quote_name(liszt_entry_name(es, e),
+                                         &o->filename_qopts,
+                                         o->qmark_funny_chars, want_width,
+                                         &qlen, &width, &quoted);
+        if (qlen != e->name_len
+            || memcmp(q, liszt_entry_name(es, e), qlen) != 0) {
+            m->quoted_off = liszt_entries_add_bytes(es, q, qlen);
+            m->quoted_len = (uint32_t)qlen;
+        }
+        m->disp_width = width;
+        m->quoted = quoted;
+        if (quoted)
+            cur_some_quoted = true;
+    }
+    for (size_t i = 0; i < es->len; i++) {
+        struct liszt_entrymeta *m = &es->meta[es->v[i].meta_idx];
+        m->padded = o->align_variable_outer_quotes && cur_some_quoted
+            && !m->quoted;
+    }
+}
+
 static bool
 needs_columns(const struct liszt_options *o)
 {
@@ -520,28 +677,68 @@ needs_columns(const struct liszt_options *o)
         || o->print_inode;
 }
 
+struct batch_ctx {
+    const struct liszt_options *o;
+    const struct litem *items;
+    const struct lwidths *w;
+};
+
 static void
-emit_entries(const struct liszt_options *o, struct liszt_entries *es,
-             bool with_total)
+layout_emit_cb(size_t idx, size_t start_col, void *vctx)
+{
+    struct batch_ctx *c = vctx;
+    (void)start_col;
+    emit_frills(c->o, c->w, &c->items[idx]);
+    emit_name(&c->items[idx]);
+}
+
+/* GNU length_of_file_name_and_frills: frills use column widths for
+   -C/-x but natural widths for -m; name length is quoted width plus the
+   align pad. */
+static size_t
+item_length(const struct liszt_options *o, const struct lwidths *w,
+            const struct litem *it)
+{
+    size_t len = 0;
+    char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
+
+    if (o->print_inode)
+        len += 1 + (o->format == LISZT_FMT_COMMAS
+                    ? (it->stat_ok
+                       ? (size_t)digits_umax((uintmax_t)it->st->ino)
+                       : 1)
+                    : (size_t)w->inode);
+    if (o->print_block_size)
+        len += 1 + (o->format == LISZT_FMT_COMMAS
+                    ? (it->stat_ok
+                       ? strlen(liszt_human_readable(
+                             (uintmax_t)it->st->blocks, hbuf,
+                             o->human_output_opts, ST_NBLOCKSIZE,
+                             o->output_block_size))
+                       : 1)
+                    : (size_t)w->blocks);
+    /* GNU quote_name_width returns width + pad in size_t: a rejected
+       width (-1 sentinel) becomes SIZE_MAX and pad can wrap it to 0. */
+    len += (size_t)(ptrdiff_t)it->width + it->padded;
+    return len;
+}
+
+static void
+emit_batch(const struct liszt_options *o, const struct litem *items,
+           size_t n, bool with_total)
 {
     struct lwidths w = { 0 };
-    struct litem it;
 
-    if (needs_columns(o)) {
-        for (size_t i = 0; i < es->len; i++) {
-            entry_to_item(es, &es->v[i], &it);
-            widths_add(&w, o, &it);
-        }
-    }
+    if (needs_columns(o))
+        for (size_t i = 0; i < n; i++)
+            widths_add(&w, o, &items[i]);
 
     if (with_total
         && (o->format == LISZT_FMT_LONG || o->print_block_size)) {
         uintmax_t total = 0;
-        for (size_t i = 0; i < es->len; i++) {
-            entry_to_item(es, &es->v[i], &it);
-            if (it.stat_ok)
-                total += (uintmax_t)it.st->blocks;
-        }
+        for (size_t i = 0; i < n; i++)
+            if (items[i].stat_ok)
+                total += (uintmax_t)items[i].st->blocks;
         char hbuf[LISZT_LONGEST_HUMAN_READABLE + 1];
         liszt_emit_str("total ");
         liszt_emit_str(liszt_human_readable(total, hbuf,
@@ -551,10 +748,60 @@ emit_entries(const struct liszt_options *o, struct liszt_entries *es,
         liszt_emit_byte('\n');
     }
 
-    for (size_t i = 0; i < es->len; i++) {
-        entry_to_item(es, &es->v[i], &it);
-        emit_item(o, &w, &it);
+    if (n == 0)
+        return;
+
+    switch (o->format) {
+    case LISZT_FMT_MANY:
+    case LISZT_FMT_HORIZONTAL: {
+        struct batch_ctx ctx = { o, items, &w };
+        if (!o->line_length) {
+            size_t *lengths = liszt_xmalloc(n * sizeof *lengths);
+            for (size_t i = 0; i < n; i++)
+                lengths[i] = item_length(o, &w, &items[i]);
+            liszt_layout_separated(n, lengths, ' ', 0, layout_emit_cb,
+                                   &ctx);
+            free(lengths);
+            break;
+        }
+        size_t *lengths = liszt_xmalloc(n * sizeof *lengths);
+        for (size_t i = 0; i < n; i++)
+            lengths[i] = item_length(o, &w, &items[i]);
+        liszt_layout_columns(n, lengths, o->format == LISZT_FMT_MANY,
+                             o->line_length, o->max_idx, o->tabsize,
+                             layout_emit_cb, &ctx);
+        free(lengths);
+        break;
     }
+    case LISZT_FMT_COMMAS: {
+        struct batch_ctx ctx = { o, items, &w };
+        size_t *lengths = liszt_xmalloc(n * sizeof *lengths);
+        for (size_t i = 0; i < n; i++)
+            lengths[i] = item_length(o, &w, &items[i]);
+        liszt_layout_separated(n, lengths, ',', o->line_length,
+                               layout_emit_cb, &ctx);
+        free(lengths);
+        break;
+    }
+    case LISZT_FMT_LONG:
+    case LISZT_FMT_ONE:
+    default:
+        for (size_t i = 0; i < n; i++)
+            emit_item(o, &w, &items[i]);
+        break;
+    }
+}
+
+static void
+emit_entries(const struct liszt_options *o, struct liszt_entries *es,
+             bool with_total)
+{
+    struct litem *items = liszt_xmalloc(es->len * sizeof *items);
+
+    for (size_t i = 0; i < es->len; i++)
+        entry_to_item(es, &es->v[i], &items[i]);
+    emit_batch(o, items, es->len, with_total);
+    free(items);
 }
 
 /* GNU print_dir: header when print_dir_name, blank line before every
@@ -574,13 +821,20 @@ print_dir(const char *name, bool command_line, bool print_dir_name,
     }
 
     fill_meta(name, o, es);
+    decorate_entries(o, es);
     liszt_sort_entries(es);
 
     if (print_dir_name) {
         if (!*first)
             liszt_emit_byte('\n');
         *first = false;
-        liszt_emit_bytes(name, strlen(name));
+        size_t hlen;
+        int hwidth;
+        bool hquoted;
+        const char *hq = liszt_quote_name(name, &o->dirname_qopts,
+                                          o->qmark_funny_chars, false,
+                                          &hlen, &hwidth, &hquoted);
+        liszt_emit_bytes(hq, hlen);
         liszt_emit_str(":\n");
     }
     emit_entries(o, es, true);
@@ -596,6 +850,7 @@ main(int argc, char **argv)
     liszt_diag_init();
 
     liszt_options_parse(argc, argv, &o);
+    cur_opts = &o;
 
     liszt_plan_select(&o, &plan);
     liszt_plan_debug_print(&plan);
@@ -615,6 +870,9 @@ main(int argc, char **argv)
                 n_ops++;
     }
 
+    decorate_operands(&o, ops, n_ops);
+    bool ops_some_quoted = cur_some_quoted;
+
     if (o.sort != LISZT_SORT_NONE && n_ops > 1)
         liszt_sort_operands(ops, (size_t)n_ops, sizeof *ops, operand_item);
 
@@ -629,28 +887,48 @@ main(int argc, char **argv)
        the WHOLE operand batch, dirs included: GNU accumulates widths in
        gobble_file before extract_dirs_from_files removes the dirs
        (pinned by fuzz - a dir operand's size widens the file batch's
-       size column). */
+       size column). The file batch itself lays out through emit_batch,
+       but its column widths still come from the full-batch pass. */
     if (n_files > 0) {
+        cur_some_quoted = ops_some_quoted;
         struct lwidths w = { 0 };
         struct litem it;
+        struct litem *fitems = liszt_xmalloc((size_t)n_files
+                                             * sizeof *fitems);
+        int nf = 0;
         if (needs_columns(&o)) {
             for (int i = 0; i < n_ops; i++) {
-                it = (struct litem){ ops[i].name, &ops[i].st,
-                                     ops[i].linkname, ops[i].linkmode,
-                                     ops[i].ftype, ops[i].stat_ok,
-                                     ops[i].acl };
+                operand_to_litem(&ops[i], &it);
                 widths_add(&w, &o, &it);
             }
         }
-        for (int i = 0; i < n_ops; i++) {
-            if (ops[i].is_dir)
-                continue;
-            it = (struct litem){ ops[i].name, &ops[i].st,
-                                 ops[i].linkname, ops[i].linkmode,
-                                 ops[i].ftype, ops[i].stat_ok,
-                                 ops[i].acl };
-            emit_item(&o, &w, &it);
+        for (int i = 0; i < n_ops; i++)
+            if (!ops[i].is_dir)
+                operand_to_litem(&ops[i], &fitems[nf++]);
+
+        if (o.format == LISZT_FMT_LONG || o.format == LISZT_FMT_ONE) {
+            for (int i = 0; i < nf; i++)
+                emit_item(&o, &w, &fitems[i]);
+        } else {
+            struct batch_ctx ctx = { &o, fitems, &w };
+            size_t *lengths = liszt_xmalloc((size_t)nf * sizeof *lengths);
+            for (int i = 0; i < nf; i++)
+                lengths[i] = item_length(&o, &w, &fitems[i]);
+            if (o.format == LISZT_FMT_COMMAS)
+                liszt_layout_separated((size_t)nf, lengths, ',',
+                                       o.line_length, layout_emit_cb,
+                                       &ctx);
+            else if (!o.line_length)
+                liszt_layout_separated((size_t)nf, lengths, ' ', 0,
+                                       layout_emit_cb, &ctx);
+            else
+                liszt_layout_columns((size_t)nf, lengths,
+                                     o.format == LISZT_FMT_MANY,
+                                     o.line_length, o.max_idx, o.tabsize,
+                                     layout_emit_cb, &ctx);
+            free(lengths);
         }
+        free(fitems);
     }
     if (n_files > 0 && n_dirs > 0)
         liszt_emit_byte('\n');
@@ -673,8 +951,10 @@ main(int argc, char **argv)
     }
 
     liszt_entries_free(&es);
-    for (int i = 0; i < n_ops; i++)
+    for (int i = 0; i < n_ops; i++) {
         free(ops[i].linkname);
+        free(ops[i].qname);
+    }
     free(ops);
     free(o.operands);
 

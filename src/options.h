@@ -2,9 +2,11 @@
 #define LISZT_OPTIONS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "dirread.h"
+#include "quote.h"
 
 /* Values mirror GNU ls's enums where order matters (format/sort words). */
 enum liszt_format {
@@ -55,6 +57,15 @@ struct liszt_options {
     uintmax_t output_block_size;
     int file_human_output_opts;
     uintmax_t file_output_block_size;
+    /* Layout and quoting (sprint 04). */
+    size_t line_length;         /* 0 = unlimited */
+    size_t max_idx;
+    size_t tabsize;
+    enum liszt_qstyle quoting_style;
+    bool qmark_funny_chars;
+    bool align_variable_outer_quotes;
+    struct liszt_qopts filename_qopts;
+    struct liszt_qopts dirname_qopts;
     char **operands;    /* argv-order pointers into argv; xmalloc'd array */
     int n_operands;
 };

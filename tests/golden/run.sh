@@ -331,6 +331,75 @@ if [ 3 -le "$active" ]; then
     done
 fi
 
+# 04: layout and quoting.
+run_case 4 "-C plain w80" C 0 -- -C -w 80 "$fix/plain"
+run_case 4 "-C plain w20" C 0 -- -C -w 20 "$fix/plain"
+run_case 4 "-C plain w200" C 0 -- -C -w 200 "$fix/plain"
+run_case 4 "-C plain w1" C 0 -- -C -w 1 "$fix/plain"
+run_case 4 "-C w0 unlimited" C 0 -- -C -w 0 -a "$fix/shapes"
+run_case 4 "-C shapes -a" C 0 -- -Ca -w 80 "$fix/shapes"
+run_case 4 "-C shapes -a utf8" "$U8" 0 -- -Ca -w 80 "$fix/shapes"
+run_case 4 "-C shapes -a dict" "$D8" 0 -- -Ca -w 80 "$fix/shapes"
+run_case 4 "-x shapes" C 0 -- -xa -w 80 "$fix/shapes"
+run_case 4 "-x shapes dict" "$D8" 0 -- -xa -w 80 "$fix/shapes"
+run_case 4 "-m plain" C 0 -- -m -w 80 "$fix/plain"
+run_case 4 "-m shapes dict" "$D8" 0 -- -ma -w 80 "$fix/shapes"
+run_case 4 "-m width20" C 0 -- -ma -w 20 "$fix/shapes"
+run_case 4 "-Cs frills" C 0 -- -Csa -w 80 "$fix/sizes"
+run_case 4 "-Ci frills" C 0 -- -Ci -w 80 "$fix/plain"
+run_case 4 "-C tab0" C 0 -- -Ca -T0 -w 80 "$fix/shapes"
+run_case 4 "-C tab3" C 0 -- -Ca -T3 -w 80 "$fix/shapes"
+run_case 4 "-w invalid" C 2 -- -C -w bogus
+run_case 4 "-T invalid" C 2 -- -C -T bogus
+run_case 4 "format across" C 0 -- -a -w 80 --format=across "$fix/shapes"
+run_case 4 "format commas" C 0 -- -a -w 80 --format=commas "$fix/shapes"
+run_case 4 "format vertical" C 0 -- -a -w 80 --format=vertical "$fix/shapes"
+run_case 4 "-C operands mix" C 0 -- -C -w 80 "$fix/times/old-a" "$fix/plain" "$fix/sizes/sz512"
+run_case 4 "-m operands" C 0 -- -m -w 80 "$fix/times/old-a" "$fix/sizes/sz512"
+
+for sty in literal shell shell-always shell-escape shell-escape-always \
+    c c-maybe escape locale clocale; do
+    run_case 4 "style $sty -1" C 0 -- -1a --quoting-style=$sty "$fix/shapes"
+    run_case 4 "style $sty -1 dict" "$D8" 0 -- -1a --quoting-style=$sty "$fix/shapes"
+    run_case 4 "style $sty -l" C 0 -- -la --quoting-style=$sty "$fix/links"
+    run_case 4 "style $sty -C" C 0 -- -Ca -w 80 --quoting-style=$sty "$fix/shapes"
+done
+run_case 4 "-b escape" C 0 -- -1ab "$fix/shapes"
+run_case 4 "-N literal" C 0 -- -1aN "$fix/shapes"
+run_case 4 "-Q quote-name" C 0 -- -1aQ "$fix/shapes"
+run_case 4 "-q qmark" C 0 -- -1aq "$fix/shapes"
+run_case 4 "-q qmark dict" "$D8" 0 -- -1aq "$fix/shapes"
+run_case 4 "-q columns" C 0 -- -Caq -w 80 "$fix/shapes"
+run_case 4 "-q show-control override" C 0 -- -1aq --show-control-chars "$fix/shapes"
+run_case 4 "-lq long qmark" C 0 -- -laq "$fix/shapes"
+run_case 4 "sort width" C 0 -- -1a --sort=width "$fix/shapes"
+run_case 4 "sort width dict" "$D8" 0 -- -1a --sort=width "$fix/shapes"
+run_case 4 "sort width -C" C 0 -- -Ca -w 80 --sort=width "$fix/shapes"
+run_case 4 "sort width -r" C 0 -- -1ar --sort=width "$fix/plain"
+
+# 04 bespoke: env-driven width/tabsize/quoting.
+if [ 4 -le "$active" ]; then
+    for envspec in "COLUMNS=25" "COLUMNS=bogus" "TABSIZE=3" "TABSIZE=0" \
+        "TABSIZE=bogus" "QUOTING_STYLE=shell-escape" "QUOTING_STYLE=bogus"; do
+        cases=$((cases + 1))
+        env -i PATH="$PATH" LC_ALL=C TZ=UTC0 LS_COLORS= \
+            LISZT_DEBUG_VERIFY=1 "$envspec" \
+            "$work/liszt.uut" -Ca "$fix/shapes" > "$work/u.out" 2> "$work/u.raw"
+        urc=$?
+        env -i PATH="$PATH" LC_ALL=C TZ=UTC0 LS_COLORS= "$envspec" \
+            "$oracle" -Ca "$fix/shapes" > "$work/o.out" 2> "$work/o.raw"
+        orc=$?
+        normprog < "$work/u.raw" > "$work/u.err"
+        normprog < "$work/o.raw" > "$work/o.err"
+        if [ "$urc" -ne "$orc" ] || ! cmp -s "$work/u.out" "$work/o.out" \
+            || ! cmp -s "$work/u.err" "$work/o.err"; then
+            echo "CASE FAIL [layout env $envspec]" >&2
+            diff "$work/o.out" "$work/u.out" | head -6 >&2
+            fails=$((fails + 1))
+        fi
+    done
+fi
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

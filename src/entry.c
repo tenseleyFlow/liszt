@@ -16,6 +16,7 @@ liszt_entries_clear(struct liszt_entries *es)
 {
     es->arena_len = 0;
     es->len = 0;
+    es->meta_ready = false;
 }
 
 void
@@ -30,13 +31,20 @@ liszt_entries_free(struct liszt_entries *es)
 void
 liszt_entries_ensure_meta(struct liszt_entries *es)
 {
+    if (es->meta_ready)
+        return;     /* second caller in the same batch keeps the data */
+    es->meta_ready = true;
+    if (es->len == 0)
+        return;
     if (es->meta_cap < es->len) {
         es->meta = liszt_xrealloc(es->meta, es->len * sizeof *es->meta);
         es->meta_cap = es->len;
     }
     memset(es->meta, 0, es->len * sizeof *es->meta);
-    for (size_t i = 0; i < es->len; i++)
+    for (size_t i = 0; i < es->len; i++) {
         es->meta[i].link_off = UINT32_MAX;
+        es->meta[i].quoted_off = UINT32_MAX;
+    }
 }
 
 static void

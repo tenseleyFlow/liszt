@@ -72,8 +72,8 @@ liszt_plan_select(const struct liszt_options *o, struct liszt_plan *p)
         p->reason = "64-bit key radix";
         return;
     }
-    /* Version, extension: scalar comparators until an exact transformed
-       form is proven. */
+    /* Version, extension, width: scalar comparators until an exact
+       transformed form is proven. */
     p->sort_engine = LISZT_PLAN_SORT_SCALAR;
     p->reason = "comparator-only sort word";
 }

@@ -15,6 +15,7 @@ struct liszt_item {
     const char *name;
     off_t size;
     struct timespec mtime;
+    int width;          /* quoted display width incl. align pad */
     bool group_dir;     /* counts as a directory for grouping */
 };
 

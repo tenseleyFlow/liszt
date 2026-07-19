@@ -48,7 +48,6 @@ check_status "bare invocation lists cwd" 0 ./liszt
 check_status "default-sort operand works" 0 ./liszt /tmp
 check_status "unknown option exits 2" 2 ./liszt --bogus
 check_status "argmatch error exits 1 (GNU quirk)" 1 ./liszt --format=bogus
-check_status "unsupported sort word exits 2" 2 ./liszt --sort=width
 
 # Functional sprint-01 surface.
 udir=$(mktemp -d "${TMPDIR:-/tmp}/liszt-unit.XXXXXX")
@@ -67,6 +66,9 @@ check_eq "-A adds dotfiles only" "$((n_default + 1))" "$n_almost"
 fmt_out=$(./liszt -U --format=single-column "$udir")
 one_out=$(./liszt -U1 "$udir")
 check_eq "--format=single-column equals -1" "$one_out" "$fmt_out"
+check_status "width sort works" 0 ./liszt --sort=width "$udir"
+check_status "columns work piped" 0 ./liszt -C "$udir"
+check_status "commas work" 0 ./liszt -m "$udir"
 err=$(./liszt /liszt-no-such 2>&1 >/dev/null)
 case "$err" in
 liszt:*) : ;;

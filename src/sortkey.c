@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <locale.h>
 #include <setjmp.h>
+#include <stddef.h>
 #include <sys/stat.h>
 #include <wchar.h>
 #include <stdio.h>
@@ -315,6 +316,14 @@ item_cmp(const struct liszt_item *a, const struct liszt_item *b)
         if (diff == 0)
             diff = name_coll(a->name, b->name);
         break;
+    case LISZT_SORT_WIDTH:
+        /* GNU cmp_width subtracts size_t widths then converts to int;
+           rejected-width names carry SIZE_MAX (the width-clamp quirk). */
+        diff = (int)((size_t)(ptrdiff_t)a->width
+                     - (size_t)(ptrdiff_t)b->width);
+        if (diff == 0)
+            diff = name_coll(a->name, b->name);
+        break;
     case LISZT_SORT_NAME:
     default:
         diff = name_coll(a->name, b->name);
@@ -334,6 +343,8 @@ make_item(const struct liszt_entry *e, struct liszt_item *out)
     out->name = liszt_entry_name(cur_es, e);
     out->size = m ? m->st.size : 0;
     out->mtime = m ? m->st.mtime : (struct timespec){ 0, 0 };
+    out->width = m ? (int)((size_t)(ptrdiff_t)m->disp_width + m->padded)
+                   : 0;
     out->group_dir = e->ftype == LISZT_T_DIR
         || (m && (S_ISDIR(m->st.mode) || S_ISDIR(m->linkmode)));
 }

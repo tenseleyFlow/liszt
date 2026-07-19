@@ -110,10 +110,22 @@ gen_plan() {
         if (rand() < 0.3) flags = flags " -r"
         if (rand() < 0.25) flags = flags " --group-directories-first"
         p = rand()
-        if (p < 0.3) flags = flags " -1"
-        else if (p < 0.45) flags = flags " --format=single-column"
-        else if (p < 0.75) flags = flags " -l"
+        if (p < 0.2) flags = flags " -1"
+        else if (p < 0.3) flags = flags " --format=single-column"
+        else if (p < 0.5) flags = flags " -l"
+        else if (p < 0.65) flags = flags " -C -w " int(rand() * 100)
+        else if (p < 0.75) flags = flags " -x -w " int(rand() * 100)
+        else if (p < 0.85) flags = flags " -m -w " int(rand() * 100)
         # else: piped default resolves to one-per-line
+        p = rand()
+        if (p < 0.35) {
+            split("literal shell shell-always shell-escape " \
+                  "shell-escape-always c c-maybe escape locale clocale",
+                  qsty, " ")
+            flags = flags " --quoting-style=" qsty[int(rand() * 10) + 1]
+        }
+        if (rand() < 0.2) flags = flags " -q"
+        if (rand() < 0.1) flags = flags " --sort=width"
         p = rand()
         if (p < 0.35) flags = flags " -a"
         else if (p < 0.6) flags = flags " -A"
