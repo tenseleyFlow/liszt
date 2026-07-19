@@ -99,7 +99,7 @@ indent(size_t from, size_t to, size_t tabsize)
 void
 liszt_layout_columns(size_t n, const size_t *lengths, bool by_columns,
                      size_t line_length, size_t max_idx, size_t tabsize,
-                     liszt_layout_emit emit, void *ctx)
+                     char eol, liszt_layout_emit emit, void *ctx)
 {
     if (n == 0)
         return;
@@ -127,7 +127,7 @@ liszt_layout_columns(size_t n, const size_t *lengths, bool by_columns,
                 indent(pos + name_length, pos + max_name_length, tabsize);
                 pos += max_name_length;
             }
-            liszt_emit_byte('\n');
+            liszt_emit_byte(eol);
         }
     } else {
         size_t pos = 0;
@@ -139,7 +139,7 @@ liszt_layout_columns(size_t n, const size_t *lengths, bool by_columns,
             size_t col = filesno % cols;
 
             if (col == 0) {
-                liszt_emit_byte('\n');
+                liszt_emit_byte(eol);
                 pos = 0;
             } else {
                 indent(pos + name_length, pos + max_name_length, tabsize);
@@ -149,14 +149,14 @@ liszt_layout_columns(size_t n, const size_t *lengths, bool by_columns,
             name_length = lengths[filesno];
             max_name_length = col_arr[col];
         }
-        liszt_emit_byte('\n');
+        liszt_emit_byte(eol);
     }
 }
 
 void
 liszt_layout_separated(size_t n, const size_t *lengths, char sep,
-                       size_t line_length, liszt_layout_emit emit,
-                       void *ctx)
+                       size_t line_length, char eol,
+                       liszt_layout_emit emit, void *ctx)
 {
     size_t pos = 0;
 
@@ -175,7 +175,7 @@ liszt_layout_separated(size_t n, const size_t *lengths, char sep,
                 separator = ' ';
             } else {
                 pos = 0;
-                separator = '\n';
+                separator = eol;
             }
             liszt_emit_byte(sep);
             liszt_emit_byte(separator);
@@ -183,5 +183,5 @@ liszt_layout_separated(size_t n, const size_t *lengths, char sep,
         emit(filesno, pos, ctx);
         pos += len;
     }
-    liszt_emit_byte('\n');
+    liszt_emit_byte(eol);
 }

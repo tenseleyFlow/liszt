@@ -156,6 +156,7 @@ struct staging {
     bool print_with_color;
     int indicator_style;            /* enum liszt_indicator_style */
     int quoting_style_opt;          /* -1 unset */
+    int eolbyte;                    /* '\n'; --zero stages 0 */
     int hide_control_chars_opt;     /* -1 unset */
     long width_opt;                 /* -1 unset */
     long tabsize_opt;               /* -1 unset */
@@ -413,6 +414,16 @@ handle(int key, const char *value, const char *display, struct staging *st)
         break;
     case KEY_HIDE:
         add_pattern(&st->hide_patterns, &st->n_hide_patterns, value);
+        break;
+    case KEY_ZERO:
+        /* GNU's staging effects are positional last-wins: a later -l,
+           -q, -Q, -C or --color re-overrides the individual pieces. */
+        st->eolbyte = 0;
+        st->hide_control_chars_opt = 0;
+        if (st->format_opt != LISZT_FMT_LONG)
+            st->format_opt = LISZT_FMT_ONE;
+        st->print_with_color = false;
+        st->quoting_style_opt = LISZT_QS_LITERAL;
         break;
     case 'v':
         st->sort_opt = LISZT_SORT_VERSION;
@@ -768,6 +779,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
         .print_with_color = false,
         .indicator_style = LISZT_IND_NONE,
         .quoting_style_opt = -1,
+        .eolbyte = '\n',
         .hide_control_chars_opt = -1,
         .width_opt = -1,
         .tabsize_opt = -1
@@ -851,6 +863,7 @@ liszt_options_parse(int argc, char **argv, struct liszt_options *o)
     else
         o->sort = LISZT_SORT_NAME;
     o->time_type = (enum liszt_timetype)st.time_type;
+    o->eolbyte = (char)st.eolbyte;
     o->hide_patterns = st.hide_patterns;
     o->n_hide_patterns = st.n_hide_patterns;
     o->ignore_patterns = st.ignore_patterns;

@@ -74,6 +74,7 @@ struct liszt_options {
     int file_human_output_opts;
     uintmax_t file_output_block_size;
     /* Layout and quoting (sprint 04). */
+    char eolbyte;               /* '\n'; --zero makes it NUL */
     size_t line_length;         /* 0 = unlimited */
     size_t max_idx;
     size_t tabsize;

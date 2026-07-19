@@ -493,7 +493,7 @@ emit_long_entry(const struct liszt_options *o, const struct lwidths *w,
         if (ic)
             liszt_emit_byte(ic);
     }
-    liszt_emit_byte('\n');
+    liszt_emit_byte(o->eolbyte);
 }
 
 /* print_file_name_and_frills: normal color, frills, name, indicator. */
@@ -523,7 +523,7 @@ emit_item(const struct liszt_options *o, const struct lwidths *w,
         emit_long_entry(o, w, it);
     } else {
         emit_short_item(o, w, it, 0);
-        liszt_emit_byte('\n');
+        liszt_emit_byte(o->eolbyte);
     }
 }
 
@@ -1030,7 +1030,7 @@ emit_batch(const struct liszt_options *o, const struct litem *items,
                                             o->human_output_opts,
                                             ST_NBLOCKSIZE,
                                             o->output_block_size));
-        liszt_emit_byte('\n');
+        liszt_emit_byte(o->eolbyte);
     }
 
     if (n == 0)
@@ -1044,7 +1044,8 @@ emit_batch(const struct liszt_options *o, const struct litem *items,
             size_t *lengths = liszt_xmalloc(n * sizeof *lengths);
             for (size_t i = 0; i < n; i++)
                 lengths[i] = item_length(o, &w, &items[i]);
-            liszt_layout_separated(n, lengths, ' ', 0, layout_emit_cb,
+            liszt_layout_separated(n, lengths, ' ', 0, o->eolbyte,
+                                   layout_emit_cb,
                                    &ctx);
             free(lengths);
             break;
@@ -1054,7 +1055,7 @@ emit_batch(const struct liszt_options *o, const struct litem *items,
             lengths[i] = item_length(o, &w, &items[i]);
         liszt_layout_columns(n, lengths, o->format == LISZT_FMT_MANY,
                              o->line_length, o->max_idx, o->tabsize,
-                             layout_emit_cb, &ctx);
+                             o->eolbyte, layout_emit_cb, &ctx);
         free(lengths);
         break;
     }
@@ -1064,7 +1065,7 @@ emit_batch(const struct liszt_options *o, const struct litem *items,
         for (size_t i = 0; i < n; i++)
             lengths[i] = item_length(o, &w, &items[i]);
         liszt_layout_separated(n, lengths, ',', o->line_length,
-                               layout_emit_cb, &ctx);
+                               o->eolbyte, layout_emit_cb, &ctx);
         free(lengths);
         break;
     }
@@ -1254,16 +1255,16 @@ main(int argc, char **argv)
                 lengths[i] = item_length(&o, &w, &fitems[i]);
             if (o.format == LISZT_FMT_COMMAS)
                 liszt_layout_separated((size_t)nf, lengths, ',',
-                                       o.line_length, layout_emit_cb,
-                                       &ctx);
+                                       o.line_length, o.eolbyte,
+                                       layout_emit_cb, &ctx);
             else if (!o.line_length)
                 liszt_layout_separated((size_t)nf, lengths, ' ', 0,
-                                       layout_emit_cb, &ctx);
+                                       o.eolbyte, layout_emit_cb, &ctx);
             else
                 liszt_layout_columns((size_t)nf, lengths,
                                      o.format == LISZT_FMT_MANY,
                                      o.line_length, o.max_idx, o.tabsize,
-                                     layout_emit_cb, &ctx);
+                                     o.eolbyte, layout_emit_cb, &ctx);
             free(lengths);
         }
         free(fitems);

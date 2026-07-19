@@ -776,6 +776,32 @@ if [ -n "$de_locale" ]; then
     run_case 7 "collation edges de" "$de_locale" 0 -- -1 "$work/coll"
 fi
 
+# 08A: --zero. Entry lines and the total line take NUL; dir headers and
+# blank separators keep literal newlines. Staging effects are positional
+# last-wins: a later -l/-C/-q/-Q/--color re-overrides its piece.
+mkdir -p "$work/zdir/sub"
+printf 'x\n' > "$work/zdir/a"
+printf 'x\n' > "$work/zdir/b c"
+printf 'x\n' > "$work/zdir/$(printf 'ct\007l')"
+printf 'x\n' > "$work/zdir/sub/in"
+run_case 8 "zero plain" C 0 -- --zero "$work/zdir"
+run_case 8 "zero long after" C 0 -- --zero -l "$work/zdir"
+run_case 8 "zero long before" C 0 -- -l --zero "$work/zdir"
+run_case 8 "zero columns re-enabled" C 0 -- --zero -C "$work/zdir"
+run_case 8 "zero across" C 0 -- --zero -x "$work/zdir"
+run_case 8 "zero commas" C 0 -- --zero -m "$work/zdir"
+run_case 8 "zero commas wrap" C 0 -- --zero -m -w 10 "$work/zdir"
+run_case 8 "zero recursive" C 0 -- --zero -R "$work/zdir"
+run_case 8 "zero mixed operands" C 0 -- --zero "$work/zdir/a" "$work/zdir"
+run_case 8 "zero quote re-enabled" C 0 -- --zero -Q "$work/zdir"
+run_case 8 "zero qmark re-enabled" C 0 -- --zero -q "$work/zdir"
+run_case 8 "zero blocks" C 0 -- --zero -s "$work/zdir"
+run_case 8 "zero long all" C 0 -- --zero -la "$work/zdir"
+run_case 8 "zero sorted" C 0 -- --zero -St "$work/zdir"
+run_case 8 "zero unlimited width" C 0 -- --zero -w0 -C "$work/zdir"
+run_case 8 "zero utf8" "$U8" 0 -- --zero "$work/zdir"
+run_case_color "$DEFCOLORS" 8 "zero color re-enabled" C 0 -- --zero --color=always "$work/zdir"
+
 # 01: parser diagnostics (getopt-layer exit 2, argmatch-layer exit 1).
 run_case 1 "unrecognized long" C 2 -- --bogus
 run_case 1 "invalid short" C 2 -- -Y

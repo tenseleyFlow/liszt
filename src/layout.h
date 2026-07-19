@@ -15,12 +15,12 @@ typedef void (*liszt_layout_emit)(size_t idx, size_t start_col, void *ctx);
    the caller handles that case via liszt_layout_separated with ' '. */
 void liszt_layout_columns(size_t n, const size_t *lengths, bool by_columns,
                           size_t line_length, size_t max_idx,
-                          size_t tabsize, liszt_layout_emit emit,
+                          size_t tabsize, char eol, liszt_layout_emit emit,
                           void *ctx);
 
 /* -m (sep=',') and the zero-line-length variant of -C/-x (sep=' '). */
 void liszt_layout_separated(size_t n, const size_t *lengths, char sep,
-                            size_t line_length, liszt_layout_emit emit,
-                            void *ctx);
+                            size_t line_length, char eol,
+                            liszt_layout_emit emit, void *ctx);
 
 #endif
