@@ -30,6 +30,7 @@ struct liszt_plan {
     bool stat_dirs_for_color;   /* dir/unknown when ow/st/tw colored */
     bool stat_exec;             /* normal/unknown for -F or ex/su/sg */
     bool stat_links;            /* lnk/unknown when referent/symlink-mode */
+    bool stat_unknown_type;     /* unknown d_type when tree must descend */
     bool check_symlink_mode;    /* fetch linkname+target mode */
     bool link_target_mode;      /* stat_for_mode of targets */
     bool cap_probe;             /* security.capability when ca colored */

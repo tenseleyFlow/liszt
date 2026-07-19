@@ -925,6 +925,7 @@ meta_par_task(void *vctx, size_t i)
 
     bool check_stat = plan.needs_stat
         || (ctx->group && t == LISZT_T_UNKNOWN)
+        || (t == LISZT_T_UNKNOWN && plan.stat_unknown_type)
         || ((t == LISZT_T_DIR || t == LISZT_T_UNKNOWN)
             && plan.stat_dirs_for_color)
         || ((t == LISZT_T_LNK || t == LISZT_T_UNKNOWN)
@@ -1191,6 +1192,7 @@ fill_meta(const char *dirname, const struct liszt_options *o,
 
         bool check_stat = plan.needs_stat
             || (group && t == LISZT_T_UNKNOWN)
+            || (t == LISZT_T_UNKNOWN && plan.stat_unknown_type)
             || ((t == LISZT_T_DIR || t == LISZT_T_UNKNOWN)
                 && plan.stat_dirs_for_color)
             || ((t == LISZT_T_LNK || t == LISZT_T_UNKNOWN)

@@ -46,6 +46,7 @@ select_fetch_set(const struct liszt_options *o, struct liszt_plan *p)
     p->stat_dirs_for_color = false;
     p->stat_exec = false;
     p->stat_links = false;
+    p->stat_unknown_type = o->tree;
     p->check_symlink_mode = false;
     p->link_target_mode = false;
     p->cap_probe = false;
@@ -77,7 +78,8 @@ liszt_plan_color_update(const struct liszt_options *o, struct liszt_plan *p)
                 || liszt_color_is_colored(LISZT_C_SETGID)));
     p->stat_links = (o->print_inode || color
                      || o->indicator_style != LISZT_IND_NONE
-                     || o->group_directories_first || o->recursive)
+                     || o->group_directories_first || o->recursive
+                     || o->tree)
         && (o->deref == LISZT_DEREF_ALWAYS
             || liszt_color_symlink_as_referent()
             || p->check_symlink_mode);
