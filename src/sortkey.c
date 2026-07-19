@@ -241,7 +241,8 @@ name_coll(const char *a, const char *b)
             return 0;
         }
         liszt_error(errno, "cannot compare file names %s%s%s and %s%s%s",
-                    liszt_qL(), a, liszt_qR(), liszt_qL(), b, liszt_qR());
+                    liszt_qL(), liszt_quote_diag(a), liszt_qR(),
+                    liszt_qL(), liszt_quote_diag(b), liszt_qR());
         liszt_set_exit_status(false);
         longjmp(S.failed_strcoll, 1);
     }
@@ -283,6 +284,16 @@ item_cmp(const struct liszt_item *a, const struct liszt_item *b)
             return d;
     }
 
+    /* GNU's rev_ comparator variants SWAP ARGUMENTS rather than negate:
+       observable in the argument order of cannot-compare diagnostics
+       (pinned via FreeBSD EILSEQ runs). The dirs-first prefix above uses
+       the unswapped pair, exactly like DIRFIRST_CHECK. */
+    if (S.reverse) {
+        const struct liszt_item *t = a;
+        a = b;
+        b = t;
+    }
+
     int diff;
     switch (S.word) {
     case LISZT_SORT_EXTENSION:
@@ -309,7 +320,7 @@ item_cmp(const struct liszt_item *a, const struct liszt_item *b)
         diff = name_coll(a->name, b->name);
         break;
     }
-    return S.reverse ? -diff : diff;
+    return diff;
 }
 
 /* Entries context for building items: meta is optional (zeros). */

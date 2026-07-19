@@ -35,6 +35,13 @@ void liszt_diag_init(void);
 const char *liszt_qL(void);
 const char *liszt_qR(void);
 
+/* Escape NAME for a locale-quoted diagnostic the way gnulib quotearg's
+   locale style does: valid printable multibyte passes through; control
+   bytes get C named escapes (\t \n ...), backslash doubles, everything
+   else unprintable/invalid becomes 3-digit octal. Returns a static
+   rotating buffer (two slots: a diagnostic may quote two names). */
+const char *liszt_quote_diag(const char *name);
+
 /* "Try 'ARGV0 --help' for more information." to stderr. The _die form
    exits 2 (getopt-layer). argmatch-layer errors print the same line but
    exit 1 - GNU's exit_failure default, pinned against 9.11. */
