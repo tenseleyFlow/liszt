@@ -71,6 +71,6 @@ if [ -n "$have_eza" ]; then
     echo "icons_vs_eza=${eza_x}x" >> "$out"
 fi
 
-sed -n '/icons_gate\|icons_vs_eza/p' "$out"
+grep -E "icons_gate|icons_vs_eza" "$out"
 echo "bench/run-icons: results in $out"
 [ "$fails" -eq 0 ]

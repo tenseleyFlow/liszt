@@ -106,6 +106,6 @@ else
     echo "git_gate=SKIP (no hyperfine)" >> "$out"
 fi
 
-sed -n '/git_syscalls\|git_gate\|syscalls_/p' "$out"
+grep -E "git_syscalls|git_gate|syscalls_" "$out"
 echo "bench/run-git: results in $out"
 [ "$fails" -eq 0 ]

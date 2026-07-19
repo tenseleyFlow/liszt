@@ -117,6 +117,6 @@ else
     echo "tree_gate=SKIP (no hyperfine)" >> "$out"
 fi
 
-sed -n '/fd_ceiling\|tree_gate\|tree_lines/p' "$out"
+grep -E "fd_ceiling|tree_gate|tree_lines" "$out"
 echo "bench/run-tree: results in $out"
 [ "$fails" -eq 0 ]
