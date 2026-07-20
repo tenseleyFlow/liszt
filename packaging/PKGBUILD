@@ -6,7 +6,7 @@
 # symlink if you do not use mtools; decision recorded in the README.
 pkgname=liszt
 pkgver=0.3.0
-pkgrel=1
+pkgrel=2
 pkgdesc="GNU ls reimplementation: byte-identical output, radix sorts, parallel stat"
 arch=('x86_64' 'aarch64')
 url="https://github.com/tenseleyFlow/liszt"
