@@ -95,6 +95,20 @@ stat-less listing plan is preserved. Not combinable with
 .B \-\-dired
 (positional last-wins, like
 .BR \-\-hyperlink ).
+.IP
+The glyphs live in the Unicode private-use area, so a
+.B Nerd Font
+must be installed for them to render; without one the terminal draws
+replacement boxes. liszt emits the same bytes either way - this is a
+system font matter, not an output difference. Installing any Nerd Font
+is enough even when the terminal is configured for another family,
+since fontconfig falls back per glyph. To check coverage:
+.IP
+.EX
+fc\-list :charset=e5ff family
+.EE
+.IP
+An empty result means no installed font carries the icon range.
 .TP
 .B \-\-tree
 List directory contents as a tree. Implies recursion; the format is

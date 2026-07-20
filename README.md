@@ -109,7 +109,11 @@ by exact spelling only (no abbreviation).
   curated mappings), resolved from the name and dirent type alone: no
   stat, no directory reads. `LS_ICONS` overrides per suffix, filename,
   directory, or filetype label; `LISZT_ICONS_OSC66=1` wraps glyphs in
-  kitty's text-sizing protocol for terminal-guaranteed width.
+  kitty's text-sizing protocol for terminal-guaranteed width. Requires a
+  Nerd Font installed on the system, or the terminal draws boxes -
+  fontconfig falls back per glyph, so any Nerd Font works regardless of
+  the terminal's configured family (`fc-list :charset=e5ff family`
+  should be non-empty).
 - `--tree` - structural tree with `--level=N`, `--tree-limit=N`
   ("... K more" collapsing), `--tree-glyphs=unicode|ascii|auto`. One
   directory descriptor open at any depth: a 100k-node tree lists under
