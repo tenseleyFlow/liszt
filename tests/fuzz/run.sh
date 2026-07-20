@@ -312,14 +312,18 @@ EOF
     fi
     # --color=full strip-identity sublane (every 7th trial): removing
     # SGR from the full theme reproduces the always bytes exactly.
+    # A rotating preset keeps the invariant honest under every theme.
     if [ $((t % 7)) -eq 0 ]; then
+        case $((t % 4)) in
+        0) fuzz_theme=default ;;
+        1) fuzz_theme=dracula ;;
+        2) fuzz_theme=nord ;;
+        *) fuzz_theme=catppuccin-mocha ;;
+        esac
         env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
             LS_COLORS="$FUZZ_LSC" \
-            "$work/liszt.uut" --color=full \
-            --theme=$(case $((t % 4)) in 0) echo default ;; \
-                1) echo dracula ;; 2) echo nord ;; \
-                *) echo catppuccin-mocha ;; esac) -la "$tree" \
-            2>/dev/null \
+            "$work/liszt.uut" --color=full --theme="$fuzz_theme" \
+            -la "$tree" 2>/dev/null \
             | sed 's/\x1b\[[0-9;]*[mK]//g' > "$work/cf1"
         env -i PATH="$PATH" LC_ALL="$lc" TZ=UTC0 COLUMNS=80 \
             LS_COLORS="$FUZZ_LSC" \
