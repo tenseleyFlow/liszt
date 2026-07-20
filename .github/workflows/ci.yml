@@ -82,6 +82,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Idempotent: an API-outage rerun uploads into the release a
+          # manual recovery already created (v0.3.0 lesson).
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" --clobber \
+              liszt-*.tar.gz SHA256SUMS
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "liszt ${GITHUB_REF_NAME}" \
             --notes "Byte-identical to GNU ls 9.11 under a pinned environment with no extension flag active; faster on every measured workload on both release machines. Extensions, all off by default: Nerd-Font icons (--icons), tree mode (--tree), dependency-free git status (--git), eza-grade metadata coloring (--color=full), and 23 built-in 24-bit themes (--theme, LISZT_THEME, LISZT_COLORS) - measured 4-16x faster than the eza equivalents (bench/release/ in the tree). Full golden, fuzz, and sanitizer gates green on Linux (glibc, musl), macOS, and FreeBSD." \
