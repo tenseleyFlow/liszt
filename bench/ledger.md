@@ -30,6 +30,10 @@ Extension lanes (v0.2, dev box, 100k flat, 20 runs):
 - themes (100k -l, 10 runs): --theme=dracula 1.09x the --color=full
   lane (gate 1.10; 24-bit payloads are ~2.5x the escape bytes).
   2026-07-19.
+- v0.3.0 release lanes: dev box full/always 1.155, theme/full 0.994,
+  full vs eza -l 4.5x; nomad-1 full/always 1.014, theme/full 1.018,
+  full vs eza 8.0x. GNU matrix all lanes >= 1.08 (dev) / >= 1.0
+  (nomad). Artifacts: bench/release/*-v0.3.0-*. 2026-07-20.
 - v0.2.0 release lanes, nomad-1 (M5 Pro, APFS): icons color-lane
   ratio 1.042, 10.4x vs eza; --tree 41.0ms vs -R -1 58.8ms (0.696),
   eza -T 522.6ms = 12.7x; -l --git 382.5ms vs -l 342.7ms (1.116),

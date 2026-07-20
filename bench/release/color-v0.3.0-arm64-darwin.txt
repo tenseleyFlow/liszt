@@ -1,0 +1,30 @@
+kind=color
+host=nomad
+os=Darwin 25.4.0 arm64
+liszt_version=liszt 0.2.0
+fixture=/tmp/liszt-perf-100k entries=100000
+
+Benchmark 1: env LC_ALL=C LS_COLORS='' ./liszt --color=always -l /tmp/liszt-perf-100k
+  Time (mean ± σ):     200.3 ms ±   2.2 ms    [User: 62.3 ms, System: 842.4 ms]
+  Range (min … max):   197.9 ms … 204.8 ms    10 runs
+ 
+Benchmark 2: env LC_ALL=C LS_COLORS='' ./liszt --color=full -l /tmp/liszt-perf-100k
+  Time (mean ± σ):     203.1 ms ±   2.2 ms    [User: 64.1 ms, System: 841.8 ms]
+  Range (min … max):   200.0 ms … 206.9 ms    10 runs
+ 
+Benchmark 3: env LC_ALL=C LS_COLORS='' ./liszt --theme=dracula -l /tmp/liszt-perf-100k
+  Time (mean ± σ):     206.8 ms ±   2.8 ms    [User: 66.9 ms, System: 849.7 ms]
+  Range (min … max):   202.5 ms … 211.3 ms    10 runs
+ 
+Benchmark 4: env LC_ALL=C eza -l --color=always /tmp/liszt-perf-100k
+  Time (mean ± σ):      1.630 s ±  0.006 s    [User: 0.648 s, System: 21.954 s]
+  Range (min … max):    1.623 s …  1.639 s    10 runs
+ 
+Summary
+  env LC_ALL=C LS_COLORS='' ./liszt --color=always -l /tmp/liszt-perf-100k ran
+    1.01 ± 0.02 times faster than env LC_ALL=C LS_COLORS='' ./liszt --color=full -l /tmp/liszt-perf-100k
+    1.03 ± 0.02 times faster than env LC_ALL=C LS_COLORS='' ./liszt --theme=dracula -l /tmp/liszt-perf-100k
+    8.14 ± 0.09 times faster than env LC_ALL=C eza -l --color=always /tmp/liszt-perf-100k
+full_gate=PASS (full/always 1.014 <= 1.25)
+theme_gate=PASS (theme/full 1.018 <= 1.10)
+full_vs_eza=8.0x
